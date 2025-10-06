@@ -31,15 +31,23 @@ ProductSchema.set('toJSON', {
 });
 
 const init = async () => {
-  await connectMongo();
-  mongoReady = true;
-  ProductModel = mongoose.models.Product || mongoose.model('Product', ProductSchema);
-
+  console.log('[DEBUG] productosService.init() llamado');
   try {
-    await ProductModel.createIndexes();
-    console.log('[productosService] índices creados/verificados');
+    await connectMongo();
+    console.log('[DEBUG] MongoDB conectado desde productosService');
+    mongoReady = true;
+    ProductModel = mongoose.models.Product || mongoose.model('Product', ProductSchema);
+    console.log('[DEBUG] ProductModel inicializado');
+    
+    try {
+      await ProductModel.createIndexes();
+      console.log('[productosService] índices creados/verificados');
+    } catch (err) {
+      console.warn('[productosService] fallo creando índices (quizá ya existen):', err.message || err);
+    }
   } catch (err) {
-    console.warn('[productosService] fallo creando índices (quizá ya existen):', err.message || err);
+    console.error('[DEBUG] Error en productosService.init():', err);
+    throw err;
   }
 };
 
@@ -65,8 +73,11 @@ const normalize = (doc) => {
   };
 };
 
-const ensureMongoReady = () => {
-  if (!mongoReady || !ProductModel) throw new Error('productosService: MongoDB no inicializado. Llamá a init() primero.');
+const ensureMongoReady = async () => {
+  if (!mongoReady || !ProductModel) {
+    console.log('🔄 Auto-inicializando productosService...');
+    await init();
+  }
 };
 
 /* ---------- API ---------- */
@@ -75,7 +86,7 @@ const ensureMongoReady = () => {
  * listarProductos({ categoria, marca })
  */
 const listarProductos = async ({ categoria, marca } = {}) => {
-  ensureMongoReady();
+  await ensureMongoReady();
   const filter = {};
   if (categoria) filter.categoria = categoria;
   if (marca) filter.marca = marca;
@@ -94,7 +105,7 @@ const listarProductos = async ({ categoria, marca } = {}) => {
  * acepta ObjectId string o id numérico (oldId)
  */
 const obtenerProductoPorId = async (id) => {
-  ensureMongoReady();
+  await ensureMongoReady();
   if (!id) return null;
 
   // ObjectId path
@@ -119,7 +130,7 @@ const obtenerProductoPorId = async (id) => {
  * payload puede incluir oldId para preservar id antiguo
  */
 const crearProducto = async (payload = {}) => {
-  ensureMongoReady();
+  await ensureMongoReady();
   const {
     nombre,
     marca = null,
@@ -156,7 +167,7 @@ const crearProducto = async (payload = {}) => {
  * actualizarProducto(id, payload)
  */
 const actualizarProducto = async (id, payload = {}) => {
-  ensureMongoReady();
+  await ensureMongoReady();
   let filter = null;
   if (typeof id === 'string' && mongoose.Types.ObjectId.isValid(id)) filter = { _id: mongoose.Types.ObjectId(id) };
   else if (!isNaN(Number(id))) filter = { oldId: Number(id) };
@@ -187,7 +198,7 @@ const actualizarProducto = async (id, payload = {}) => {
  * eliminarProducto(id)
  */
 const eliminarProducto = async (id) => {
-  ensureMongoReady();
+  await ensureMongoReady();
   let filter = null;
   if (typeof id === 'string' && mongoose.Types.ObjectId.isValid(id)) filter = { _id: mongoose.Types.ObjectId(id) };
   else if (!isNaN(Number(id))) filter = { oldId: Number(id) };
@@ -202,7 +213,7 @@ const eliminarProducto = async (id) => {
  * Devuelve productos ordenados por cantidad vendida (sold_qty). Si no hay sale_items devuelve productos por nombre.
  */
 const topProductos = async (limit = 12) => {
-  ensureMongoReady();
+  await ensureMongoReady();
 
   try {
     const saleItemsColl = mongoose.connection.collection('sale_items');
@@ -259,7 +270,7 @@ const topProductos = async (limit = 12) => {
  * searchProductos({ q, categoria, limit = 50, offset = 0 })
  */
 const searchProductos = async ({ q, categoria, limit = 50, offset = 0 } = {}) => {
-  ensureMongoReady();
+  await ensureMongoReady();
   const filter = {};
   if (q) {
     const re = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
