@@ -163,13 +163,12 @@ const crearProducto = async (payload = {}) => {
   return normalize(saved);
 };
 
-/**
- * actualizarProducto(id, payload)
- */
+
 const actualizarProducto = async (id, payload = {}) => {
   await ensureMongoReady();
   let filter = null;
-  if (typeof id === 'string' && mongoose.Types.ObjectId.isValid(id)) filter = { _id: mongoose.Types.ObjectId(id) };
+  
+  if (typeof id === 'string' && mongoose.Types.ObjectId.isValid(id)) filter = { _id: new mongoose.Types.ObjectId(id) };
   else if (!isNaN(Number(id))) filter = { oldId: Number(id) };
   else filter = { _id: id };
 
