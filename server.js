@@ -34,8 +34,6 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
       console.log('[server] Conexión a Mongo OK');
     } catch (err) {
       console.warn('[server] No se pudo conectar a Mongo (si no lo tenés configurado está bien por ahora):', err.message);
-      // Si quieres obligar a que Mongo esté presente, lanza el error aquí:
-      // throw err;
     }
 
     // 2) Inicializar servicios que requieran setup (índices, modelos)
@@ -46,10 +44,9 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
         console.log('[server] alertsService inicializado');
       }
     } catch (err) {
-      console.warn('[server] No se pudo inicializar alertsService (revisá src/services/alertsService):', err.message);
+      console.warn('[server] No se pudo inicializar alertsService:', err.message);
     }
 
-    // AGREGAR INICIALIZACIÓN DE PRODUCTOS SERVICE
     try {
       const productosService = require('./src/services/productosService');
       if (productosService && typeof productosService.init === 'function') {
@@ -60,7 +57,6 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
       console.warn('[server] No se pudo inicializar productosService:', err.message);
     }
 
-    // AGREGAR INICIALIZACIÓN DE CUSTOMERS SERVICE
     try {
       const customersService = require('./src/services/customersService');
       if (customersService && typeof customersService.init === 'function') {
@@ -71,7 +67,6 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
       console.warn('[server] No se pudo inicializar customersService:', err.message);
     }
 
-    // AGREGAR INICIALIZACIÓN DE SERVICES SERVICE
     try {
       const servicesService = require('./src/services/servicesService');
       if (servicesService && typeof servicesService.init === 'function') {
@@ -82,12 +77,32 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
       console.warn('[server] No se pudo inicializar servicesService:', err.message);
     }
 
+    // Ruta manual para generar alertas (TEMPORAL - para testing)
+    app.get('/api/alerts/generate', async (req, res) => {
+      try {
+        const alertsService = require('./src/services/alertsService');
+        console.log('[DEBUG] Generando alertas manualmente...');
+        const created = await alertsService.checkAndCreateAlerts();
+        res.json({ 
+          success: true, 
+          message: `Generadas ${created.length} alertas`,
+          alerts: created 
+        });
+      } catch (err) {
+        console.error('[DEBUG] Error generando alertas:', err);
+        res.status(500).json({ 
+          success: false, 
+          error: err.message 
+        });
+      }
+    });
+
     // 3) Montar rutas (después de init para que controllers puedan usar servicios inicializados)
-    app.use('/api', authRoutes);        // /api/login
-    app.use('/api/products', productosRoutes); // /api/products
-    app.use('/api/sales', salesRoutes); // /api/sales
-    app.use('/api/services', servicesRoutes); // /api/services
-    app.use('/api/alerts', alertsRoutes); // alerts
+    app.use('/api', authRoutes);
+    app.use('/api/products', productosRoutes);
+    app.use('/api/sales', salesRoutes);
+    app.use('/api/services', servicesRoutes);
+    app.use('/api/alerts', alertsRoutes);
     app.use('/api/reports', reportsRoutes);
     app.use('/api/customers', customersRoutes);
     app.use('/api/payments', paymentsRoutes);
@@ -111,20 +126,17 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
       console.error('[server] No se pudo arrancar alertsJob:', err.message);
     }
 
-    // Graceful shutdown (opcional pero recomendado)
+    // Graceful shutdown
     const shutdown = async () => {
       console.log('Cerrando servidor...');
       server.close(() => console.log('HTTP server cerrado'));
-      // cerrar Mongo si está conectada
       try {
         const { mongoose } = require('./config/mongo');
         if (mongoose && mongoose.connection && mongoose.connection.readyState === 1) {
           await mongoose.disconnect();
           console.log('Mongo desconectado');
         }
-      } catch (e) {
-        /* ignore */
-      }
+      } catch (e) {}
       process.exit(0);
     };
     process.on('SIGINT', shutdown);
