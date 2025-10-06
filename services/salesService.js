@@ -91,39 +91,94 @@ const normalizeSale = async (doc) => {
   await ensureMongoReady();
   
   if (!doc) return null;
+  
   const sale = {
     id: doc.id || (doc._id ? String(doc._id) : (doc.oldId != null ? String(doc.oldId) : null)),
-    items: (doc.items || []).map(it => ({
-      productRef: it.productRef || null,
-      oldProductId: it.oldProductId ?? null,
-      serviceRef: it.serviceRef || null,
-      oldServiceId: it.oldServiceId ?? null,
-      qty: it.qty,
-      unit_price: it.unit_price,
-      unit_cost: it.unit_cost,
-      line_total: it.line_total,
-      created_at: it.created_at || it.createdAt || null
-    })),
-    total: doc.total,
-    total_items: doc.total_items,
-    paid_amount: doc.paid_amount,
-    outstanding_amount: doc.outstanding_amount,
+    items: [],
+    total: doc.total || 0,
+    total_items: doc.total_items || 0,
+    paid_amount: doc.paid_amount || 0,
+    outstanding_amount: doc.outstanding_amount || 0,
     on_credit: !!doc.on_credit,
     status: doc.status || 'pending',
     created_at: doc.created_at || doc.createdAt || null,
     updated_at: doc.updated_at || doc.updatedAt || null,
     customer: null,
-    raw: doc
   };
 
-  // populate customer if possible (customersService should accept mongo id or oldId)
+  // Procesar items y obtener información completa de productos
+  for (const it of (doc.items || [])) {
+    let productInfo = null;
+    let serviceInfo = null;
+    
+    // Obtener información del producto si existe
+    if (it.productRef || it.oldProductId) {
+      try {
+        const productId = it.productRef ? String(it.productRef) : it.oldProductId;
+        productInfo = await productosService.obtenerProductoPorId(productId);
+      } catch (err) {
+        console.warn('[normalizeSale] Error obteniendo producto:', err.message);
+      }
+    }
+    
+    // Obtener información del servicio si existe
+    if (it.serviceRef || it.oldServiceId) {
+      try {
+        const serviceId = it.serviceRef ? String(it.serviceRef) : it.oldServiceId;
+        // Si tienes servicesService, descomenta esta línea:
+        // serviceInfo = await servicesService.getServiceById(serviceId);
+      } catch (err) {
+        console.warn('[normalizeSale] Error obteniendo servicio:', err.message);
+      }
+    }
+
+    const item = {
+      // Información de identificación
+      productRef: it.productRef || null,
+      oldProductId: it.oldProductId ?? null,
+      serviceRef: it.serviceRef || null,
+      oldServiceId: it.oldServiceId ?? null,
+      
+      // Información del producto/servicio
+      product: productInfo ? {
+        id: productInfo.id,
+        nombre: productInfo.nombre || 'Producto no encontrado',
+        precio: productInfo.precio || 0,
+        categoria: productInfo.categoria || null
+      } : null,
+      
+      service: serviceInfo ? {
+        id: serviceInfo.id,
+        nombre: serviceInfo.nombre || 'Servicio no encontrado',
+        precio: serviceInfo.precio || 0
+      } : null,
+      
+      // Datos de la venta
+      qty: it.qty || 0,
+      unit_price: Number(it.unit_price) || 0,
+      unit_cost: Number(it.unit_cost) || 0,
+      line_total: Number(it.line_total) || 0,
+      created_at: it.created_at || it.createdAt || null,
+      
+      // Información para mostrar en el frontend
+      nombre: productInfo ? productInfo.nombre : (serviceInfo ? serviceInfo.nombre : 'Item no encontrado'),
+      precio_unitario: Number(it.unit_price) || 0,
+      tipo: productInfo ? 'producto' : (serviceInfo ? 'servicio' : 'desconocido')
+    };
+
+    sale.items.push(item);
+  }
+
+  // populate customer if possible
   try {
     const cid = (doc.oldCustomerId != null) ? doc.oldCustomerId : (doc.customerRef ? String(doc.customerRef) : null);
     if (cid) {
       const c = await customersService.getCustomerById(cid);
       sale.customer = c || null;
     }
-  } catch (e) { /* ignore */ }
+  } catch (e) { 
+    console.warn('[normalizeSale] Error obteniendo cliente:', e.message);
+  }
 
   return sale;
 };
