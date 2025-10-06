@@ -25,15 +25,23 @@ ServiceSchema.set('toJSON', {
 });
 
 const init = async () => {
-  await connectMongo();
-  mongoReady = true;
-  ServiceModel = mongoose.models.Service || mongoose.model('Service', ServiceSchema);
-
+  console.log('[DEBUG] servicesService.init() llamado');
   try {
-    await ServiceModel.createIndexes();
-    console.log('[servicesService] índices creados/verificados');
+    await connectMongo();
+    console.log('[DEBUG] MongoDB conectado desde servicesService');
+    mongoReady = true;
+    ServiceModel = mongoose.models.Service || mongoose.model('Service', ServiceSchema);
+    console.log('[DEBUG] ServiceModel inicializado');
+
+    try {
+      await ServiceModel.createIndexes();
+      console.log('[servicesService] índices creados/verificados');
+    } catch (err) {
+      console.warn('[servicesService] fallo creando índices:', err.message || err);
+    }
   } catch (err) {
-    console.warn('[servicesService] fallo creando índices:', err.message || err);
+    console.error('[DEBUG] Error en servicesService.init():', err);
+    throw err;
   }
 };
 
@@ -52,9 +60,17 @@ const normalize = (doc) => {
   };
 };
 
+/* ---------- Helpers ---------- */
+const ensureMongoReady = async () => {
+  if (!mongoReady || !ServiceModel) {
+    console.log('🔄 Auto-inicializando servicesService...');
+    await init();
+  }
+};
+
 /* ---------- listServices({ q, limit, offset }) ---------- */
 const listServices = async ({ q, limit = 50, offset = 0 } = {}) => {
-  if (!mongoReady || !ServiceModel) throw new Error('MongoDB no inicializado');
+  await ensureMongoReady();
   const filter = {};
   if (q) {
     const re = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
@@ -72,7 +88,7 @@ const listServices = async ({ q, limit = 50, offset = 0 } = {}) => {
 
 /* ---------- getServiceById(id) ---------- */
 const getServiceById = async (id) => {
-  if (!mongoReady || !ServiceModel) throw new Error('MongoDB no inicializado');
+  await ensureMongoReady();
   if (!id) return null;
 
   // si es ObjectId
@@ -94,7 +110,7 @@ const getServiceById = async (id) => {
 
 /* ---------- createService(payload) ---------- */
 const createService = async (payload = {}) => {
-  if (!mongoReady || !ServiceModel) throw new Error('MongoDB no inicializado');
+  await ensureMongoReady();
   const { nombre, descripcion = null, precio = null, oldId = null } = payload;
   if (!nombre) throw new Error('nombre es requerido');
 
@@ -111,7 +127,7 @@ const createService = async (payload = {}) => {
 
 /* ---------- updateService(id, payload) ---------- */
 const updateService = async (id, payload = {}) => {
-  if (!mongoReady || !ServiceModel) throw new Error('MongoDB no inicializado');
+  await ensureMongoReady();
 
   let filter = null;
   if (isObjectId(String(id))) filter = { _id: mongoose.Types.ObjectId(String(id)) };
@@ -135,7 +151,7 @@ const updateService = async (id, payload = {}) => {
 
 /* ---------- deleteService(id) ---------- */
 const deleteService = async (id) => {
-  if (!mongoReady || !ServiceModel) throw new Error('MongoDB no inicializado');
+  await ensureMongoReady();
 
   let filter = null;
   if (isObjectId(String(id))) filter = { _id: mongoose.Types.ObjectId(String(id)) };

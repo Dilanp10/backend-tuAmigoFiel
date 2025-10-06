@@ -28,20 +28,32 @@ CustomerSchema.set('toJSON', {
 
 /* ---------- init ---------- */
 const init = async () => {
-  await connectMongo();
-  mongoReady = true;
-  CustomerModel = mongoose.models.Customer || mongoose.model('Customer', CustomerSchema);
+  console.log('[DEBUG] customersService.init() llamado');
   try {
-    await CustomerModel.createIndexes();
-    console.log('[customersService] índices de Customer creados/verificados');
+    await connectMongo();
+    console.log('[DEBUG] MongoDB conectado desde customersService');
+    mongoReady = true;
+    CustomerModel = mongoose.models.Customer || mongoose.model('Customer', CustomerSchema);
+    console.log('[DEBUG] CustomerModel inicializado');
+    
+    try {
+      await CustomerModel.createIndexes();
+      console.log('[customersService] índices de Customer creados/verificados');
+    } catch (err) {
+      console.warn('[customersService] fallo creando índices (quizá ya existen):', err.message || err);
+    }
   } catch (err) {
-    console.warn('[customersService] fallo creando índices (quizá ya existen):', err.message || err);
+    console.error('[DEBUG] Error en customersService.init():', err);
+    throw err;
   }
 };
 
 /* ---------- Helpers ---------- */
-const ensureMongoReady = () => {
-  if (!mongoReady || !CustomerModel) throw new Error('customersService: MongoDB no inicializado. Llamá a init() primero.');
+const ensureMongoReady = async () => {
+  if (!mongoReady || !CustomerModel) {
+    console.log('🔄 Auto-inicializando customersService...');
+    await init();
+  }
 };
 
 const isObjectId = (v) => typeof v === 'string' && mongoose.Types.ObjectId.isValid(v);
@@ -66,7 +78,7 @@ const normalize = (doc) => {
  * listCustomers({ q, limit=200, offset=0 })
  */
 const listCustomers = async ({ q, limit = 200, offset = 0 } = {}) => {
-  ensureMongoReady();
+  await ensureMongoReady();
   const filter = {};
   if (q) {
     const re = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
@@ -89,7 +101,7 @@ const listCustomers = async ({ q, limit = 200, offset = 0 } = {}) => {
  * - acepta id mongo (_id string) o id numérico (old sqlite id)
  */
 const getCustomerById = async (id) => {
-  ensureMongoReady();
+  await ensureMongoReady();
   if (!id) return null;
 
   // si es ObjectId válido, buscar por _id
@@ -115,7 +127,7 @@ const getCustomerById = async (id) => {
  * - si payload.oldId viene (cuando migrás), lo preserva
  */
 const createCustomer = async (payload = {}) => {
-  ensureMongoReady();
+  await ensureMongoReady();
   const { nombre, email = null, telefono = null, monthly_interest = 0, oldId = null } = payload;
   if (!nombre) throw new Error('nombre es requerido');
 
@@ -135,7 +147,7 @@ const createCustomer = async (payload = {}) => {
  * updateCustomer(id, payload)
  */
 const updateCustomer = async (id, payload = {}) => {
-  ensureMongoReady();
+  await ensureMongoReady();
 
   // localizar doc por _id o por oldId
   let filter = null;
@@ -167,7 +179,7 @@ const updateCustomer = async (id, payload = {}) => {
  * deleteCustomer(id)
  */
 const deleteCustomer = async (id) => {
-  ensureMongoReady();
+  await ensureMongoReady();
   let filter = null;
   if (id && typeof id === 'string' && isObjectId(id)) filter = { _id: mongoose.Types.ObjectId(id) };
   else if (!isNaN(Number(id))) filter = { oldId: Number(id) };
