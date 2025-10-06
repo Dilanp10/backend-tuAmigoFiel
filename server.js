@@ -49,6 +49,39 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
       console.warn('[server] No se pudo inicializar alertsService (revisá src/services/alertsService):', err.message);
     }
 
+    // AGREGAR INICIALIZACIÓN DE PRODUCTOS SERVICE
+    try {
+      const productosService = require('./src/services/productosService');
+      if (productosService && typeof productosService.init === 'function') {
+        await productosService.init();
+        console.log('[server] productosService inicializado');
+      }
+    } catch (err) {
+      console.warn('[server] No se pudo inicializar productosService:', err.message);
+    }
+
+    // AGREGAR INICIALIZACIÓN DE CUSTOMERS SERVICE
+    try {
+      const customersService = require('./src/services/customersService');
+      if (customersService && typeof customersService.init === 'function') {
+        await customersService.init();
+        console.log('[server] customersService inicializado');
+      }
+    } catch (err) {
+      console.warn('[server] No se pudo inicializar customersService:', err.message);
+    }
+
+    // AGREGAR INICIALIZACIÓN DE SERVICES SERVICE
+    try {
+      const servicesService = require('./src/services/servicesService');
+      if (servicesService && typeof servicesService.init === 'function') {
+        await servicesService.init();
+        console.log('[server] servicesService inicializado');
+      }
+    } catch (err) {
+      console.warn('[server] No se pudo inicializar servicesService:', err.message);
+    }
+
     // 3) Montar rutas (después de init para que controllers puedan usar servicios inicializados)
     app.use('/api', authRoutes);        // /api/login
     app.use('/api/products', productosRoutes); // /api/products
