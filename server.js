@@ -29,7 +29,7 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
   try {
     // 1) Conectar a Mongo (archivo: src/config/mongo.js)
     try {
-      const { connectMongo } = require('./src/config/mongo');
+      const { connectMongo } = require('./config/mongo');
       await connectMongo();
       console.log('[server] Conexión a Mongo OK');
     } catch (err) {
