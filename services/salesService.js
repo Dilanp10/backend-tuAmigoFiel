@@ -88,12 +88,11 @@ const ensureMongoReady = async () => {
 
 /* ---------- normalizeSale (mongo) ---------- */
 /* ---------- normalizeSale (mongo) ---------- */
+/* ---------- normalizeSale (mongo) ---------- */
 const normalizeSale = async (doc) => {
   await ensureMongoReady();
   
   if (!doc) return null;
-  
-  console.log('🔍 [DEBUG normalizeSale] Documento completo:', JSON.stringify(doc, null, 2));
   
   const sale = {
     id: doc.id || (doc._id ? String(doc._id) : (doc.oldId != null ? String(doc.oldId) : null)),
@@ -109,21 +108,8 @@ const normalizeSale = async (doc) => {
     customer: null,
   };
 
-  console.log(`📦 [DEBUG] Procesando ${doc.items?.length || 0} items...`);
-
   // Procesar items y obtener información completa de productos
-  for (const [index, it] of (doc.items || []).entries()) {
-    console.log(`🛒 [DEBUG Item ${index}]`, {
-      productRef: it.productRef,
-      oldProductId: it.oldProductId,
-      serviceRef: it.serviceRef,
-      oldServiceId: it.oldServiceId,
-      qty: it.qty,
-      unit_price: it.unit_price,
-      unit_cost: it.unit_cost,
-      line_total: it.line_total
-    });
-
+  for (const it of (doc.items || [])) {
     let productInfo = null;
     let serviceInfo = null;
     
@@ -131,16 +117,9 @@ const normalizeSale = async (doc) => {
     if (it.productRef || it.oldProductId) {
       try {
         const productId = it.productRef ? String(it.productRef) : it.oldProductId;
-        console.log(`🔎 [DEBUG] Buscando producto con ID: ${productId}`);
         productInfo = await productosService.obtenerProductoPorId(productId);
-        console.log(`✅ [DEBUG] Producto encontrado:`, productInfo ? {
-          id: productInfo.id,
-          nombre: productInfo.nombre,
-          precio: productInfo.precio,
-          tienePrecio: productInfo.precio != null
-        } : 'NO ENCONTRADO');
       } catch (err) {
-        console.warn(`❌ [DEBUG] Error obteniendo producto:`, err.message);
+        console.warn('[normalizeSale] Error obteniendo producto:', err.message);
       }
     }
     
@@ -148,11 +127,10 @@ const normalizeSale = async (doc) => {
     if (it.serviceRef || it.oldServiceId) {
       try {
         const serviceId = it.serviceRef ? String(it.serviceRef) : it.oldServiceId;
-        console.log(`🔎 [DEBUG] Buscando servicio con ID: ${serviceId}`);
         // Si tienes servicesService, descomenta:
         // serviceInfo = await servicesService.getServiceById(serviceId);
       } catch (err) {
-        console.warn(`❌ [DEBUG] Error obteniendo servicio:`, err.message);
+        console.warn('[normalizeSale] Error obteniendo servicio:', err.message);
       }
     }
 
@@ -160,8 +138,6 @@ const normalizeSale = async (doc) => {
     const unitPrice = Number(it.unit_price);
     const unitCost = Number(it.unit_cost); 
     const lineTotal = Number(it.line_total);
-    
-    console.log(`💰 [DEBUG] Valores numéricos - unit_price: ${it.unit_price} -> ${unitPrice}, unit_cost: ${it.unit_cost} -> ${unitCost}, line_total: ${it.line_total} -> ${lineTotal}`);
 
     const item = {
       // Información de identificación
@@ -197,13 +173,6 @@ const normalizeSale = async (doc) => {
       tipo: productInfo ? 'producto' : (serviceInfo ? 'servicio' : 'desconocido')
     };
 
-    console.log(`🎯 [DEBUG] Item final ${index}:`, {
-      nombre: item.nombre,
-      precio_unitario: item.precio_unitario,
-      unit_price: item.unit_price,
-      tieneProducto: !!productInfo
-    });
-
     sale.items.push(item);
   }
 
@@ -211,16 +180,13 @@ const normalizeSale = async (doc) => {
   try {
     const cid = (doc.oldCustomerId != null) ? doc.oldCustomerId : (doc.customerRef ? String(doc.customerRef) : null);
     if (cid) {
-      console.log(`👤 [DEBUG] Buscando cliente con ID: ${cid}`);
       const c = await customersService.getCustomerById(cid);
       sale.customer = c || null;
-      console.log(`✅ [DEBUG] Cliente encontrado:`, c ? c.nombre : 'NO ENCONTRADO');
     }
   } catch (e) { 
-    console.warn('❌ [DEBUG] Error obteniendo cliente:', e.message);
+    console.warn('[normalizeSale] Error obteniendo cliente:', e.message);
   }
 
-  console.log('🎉 [DEBUG normalizeSale] Venta normalizada final:', JSON.stringify(sale, null, 2));
   return sale;
 };
 
