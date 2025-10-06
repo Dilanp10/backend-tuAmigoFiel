@@ -1,8 +1,39 @@
-// server.js - VERSIÓN CORREGIDA PARA ESTRUCTURA EN RAÍZ
+// server.js - VERSIÓN CORREGIDA CON CORS
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
+// ==========================================================
+// 🚨 CONFIGURACIÓN DE CORS (SOLUCIÓN AL PROBLEMA)
+// ==========================================================
+
+// PASO 1: Define tu lista de orígenes permitidos (Whitelist)
+const allowedOrigins = [
+  // ⚠️ ¡IMPORTANTE! REEMPLAZA ESTE VALOR CON EL DOMINIO EXACTO DE TU NETLIFY
+  'https://68e435b14155bbbdfb6e5fd0--timely-churros-9d5736.netlify.app', 
+  
+  // Origen para desarrollo local
+  'http://localhost:4000', 
+  'http://localhost:3000',
+];
+
+// PASO 2: Crea la configuración CORS
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Permitir si el origen está en la lista O si la petición no tiene origen (caso Postman)
+    if (allowedOrigins.includes(origin) || !origin) {
+      callback(null, true);
+    } else {
+      // Bloquear si el origen no está permitido
+      callback(new Error('Acceso no permitido por CORS'));
+    }
+  },
+  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+};
+
+// ==========================================================
 // Rutas (EN RAÍZ - sin src/)
 const authRoutes = require('./routes/auth');
 const productosRoutes = require('./routes/productos');
@@ -18,7 +49,7 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Middlewares
-app.use(cors());
+app.use(cors(corsOptions)); // <--- ¡AQUÍ SE APLICA LA CONFIGURACIÓN CORREGIDA!
 app.use(express.json());
 
 // Healthcheck
@@ -37,16 +68,16 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
     }
 
     // 2) Inicializar servicios (EN RAÍZ)
-
     try {
-  const salesService = require('./services/salesService');
-  if (salesService && typeof salesService.init === 'function') {
-    await salesService.init();
-    console.log('[server] salesService inicializado');
-  }
-} catch (err) {
-  console.warn('[server] No se pudo inicializar salesService:', err.message);
-}
+      const salesService = require('./services/salesService');
+      if (salesService && typeof salesService.init === 'function') {
+        await salesService.init();
+        console.log('[server] salesService inicializado');
+      }
+    } catch (err) {
+      console.warn('[server] No se pudo inicializar salesService:', err.message);
+    }
+
     try {
       const alertsService = require('./services/alertsService'); // ← SIN src/
       if (alertsService && typeof alertsService.init === 'function') {
