@@ -1,6 +1,6 @@
 // src/services/alertsService.js
 // Este service incluye la definición del modelo Alert internamente para evitar tocar más ficheros.
-const { connectMongo, mongoose } = require('../config/mongo'); // ajusta ruta si es necesario
+const { connectMongo, mongoose } = require('./config/mongo'); // ajusta ruta si es necesario
 const productService = require('./productosService'); // tu service existente
 const nodemailer = require('nodemailer');
 

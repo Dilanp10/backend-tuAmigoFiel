@@ -1,6 +1,6 @@
 // src/services/paymentsService.js
-const { connectMongo, mongoose } = require('../config/mongo');
-const { all: sqliteAll, get: sqliteGet, run: sqliteRun } = require('../config/db.js');
+const { connectMongo, mongoose } = require('./config/mongo');
+const { all: sqliteAll, get: sqliteGet, run: sqliteRun } = require('./config/db.js');
 const salesService = require('./salesService'); // tu service existente (puede ser sqlite o mongo)
 const customersService = require('./customersService'); // convertido previamente (acepta id mongo o oldId)
 

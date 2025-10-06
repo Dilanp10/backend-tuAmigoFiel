@@ -1,7 +1,7 @@
 // backend/services/authService.js
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { connectMongo, mongoose } = require('../config/mongo');
+const { connectMongo, mongoose } = require('./config/mongo');
 
 const ENV_ADMIN_USER = process.env.ADMIN_USER || null;
 const ENV_ADMIN_PASS_HASH = process.env.ADMIN_PASS_HASH || null; // si ya tenés hash en .env

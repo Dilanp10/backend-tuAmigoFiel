@@ -1,6 +1,6 @@
 // src/services/salesService.js
-const { connectMongo, mongoose } = require('../config/mongo');
-const { all: sqliteAll, get: sqliteGet, run: sqliteRun, db: sqliteDB } = require('../config/db.js');
+const { connectMongo, mongoose } = require('./config/mongo');
+const { all: sqliteAll, get: sqliteGet, run: sqliteRun, db: sqliteDB } = require('./config/db.js');
 const productosService = require('./productosService');
 const customersService = require('./customersService');
 
