@@ -1,29 +1,13 @@
 // src/services/servicesService.js
-const { all: sqliteAll, get: sqliteGet, run: sqliteRun } = require('../config/db.js');
 const { connectMongo, mongoose } = require('../config/mongo');
 
-/// --- Asegurar tabla SQLite (mantener comportamiento existente)
-const ensure = async () => {
-  try {
-    await sqliteRun(`
-      CREATE TABLE IF NOT EXISTS services (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre TEXT NOT NULL,
-        descripcion TEXT,
-        precio REAL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  } catch (e) {
-    console.warn('[servicesService.ensure] falló create table services', e.message || e);
-  }
-};
-ensure().catch(()=>{});
+let ServiceModel = null;
+let mongoReady = false;
 
-/// --- Mongoose inline
 const { Schema } = mongoose;
+
 const ServiceSchema = new Schema({
-  oldId: { type: Schema.Types.Mixed, default: null }, // conserva id sqlite
+  oldId: { type: Schema.Types.Mixed, default: null }, // conserva id numérico si migrás desde sqlite
   nombre: { type: String, required: true, index: true },
   descripcion: { type: String, default: null },
   precio: { type: Number, default: null },
@@ -40,186 +24,126 @@ ServiceSchema.set('toJSON', {
   }
 });
 
-let ServiceModel = null;
-let mongoReady = false;
-
 const init = async () => {
-  try {
-    await connectMongo();
-    mongoReady = true;
-    ServiceModel = mongoose.models.Service || mongoose.model('Service', ServiceSchema);
+  await connectMongo();
+  mongoReady = true;
+  ServiceModel = mongoose.models.Service || mongoose.model('Service', ServiceSchema);
 
-    try {
-      await ServiceModel.createIndexes();
-      console.log('[servicesService] índices creados/verificados');
-    } catch (err) {
-      console.warn('[servicesService] fallo creando índices:', err.message || err);
-    }
+  try {
+    await ServiceModel.createIndexes();
+    console.log('[servicesService] índices creados/verificados');
   } catch (err) {
-    mongoReady = false;
-    console.warn('[servicesService] Mongo no disponible, usando SQLite como fallback:', err.message || err);
+    console.warn('[servicesService] fallo creando índices:', err.message || err);
   }
 };
+
+const isObjectId = (val) => typeof val === 'string' && mongoose.Types.ObjectId.isValid(val);
 
 const normalize = (doc) => {
   if (!doc) return null;
-  // doc puede venir de mongo (.lean()) o de sqlite
-  if (doc._id || doc.created_at || doc.updated_at) {
-    // probable doc mongo
-    return {
-      id: doc.id || (doc._id ? String(doc._id) : (doc.oldId != null ? String(doc.oldId) : null)),
-      nombre: doc.nombre,
-      descripcion: doc.descripcion || null,
-      precio: (doc.precio != null) ? Number(doc.precio) : null,
-      created_at: doc.created_at || doc.createdAt || null,
-      updated_at: doc.updated_at || doc.updatedAt || null,
-      oldId: doc.oldId ?? null,
-    };
-  }
-  // sqlite row
   return {
-    id: doc.id,
+    id: doc.id || (doc._id ? String(doc._id) : (doc.oldId != null ? String(doc.oldId) : null)),
     nombre: doc.nombre,
     descripcion: doc.descripcion ?? null,
     precio: doc.precio != null ? Number(doc.precio) : null,
-    created_at: doc.created_at || null,
-    updated_at: doc.updated_at || null,
+    created_at: doc.created_at || doc.createdAt || null,
+    updated_at: doc.updated_at || doc.updatedAt || null,
+    oldId: doc.oldId ?? null,
   };
 };
 
-/// --- listServices({ q, limit, offset })
+/* ---------- listServices({ q, limit, offset }) ---------- */
 const listServices = async ({ q, limit = 50, offset = 0 } = {}) => {
-  if (mongoReady && ServiceModel) {
-    const filter = {};
-    if (q) {
-      const re = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      filter.$or = [{ nombre: re }, { descripcion: re }];
-    }
-    const docs = await ServiceModel.find(filter)
-      .collation({ locale: 'es', strength: 1 })
-      .sort({ nombre: 1 })
-      .skip(Number(offset) || 0)
-      .limit(Number(limit) || 50)
-      .lean()
-      .exec();
-    return docs.map(normalize);
-  }
-
-  // fallback sqlite
-  let sql = 'SELECT * FROM services';
-  const params = [];
-  const where = [];
+  if (!mongoReady || !ServiceModel) throw new Error('MongoDB no inicializado');
+  const filter = {};
   if (q) {
-    where.push('(nombre LIKE ? OR descripcion LIKE ?)');
-    params.push(`%${q}%`, `%${q}%`);
+    const re = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    filter.$or = [{ nombre: re }, { descripcion: re }];
   }
-  if (where.length) sql += ' WHERE ' + where.join(' AND ');
-  sql += ' ORDER BY nombre COLLATE NOCASE LIMIT ? OFFSET ?';
-  params.push(Number(limit), Number(offset));
-  return await sqliteAll(sql, params);
+  const docs = await ServiceModel.find(filter)
+    .collation({ locale: 'es', strength: 1 })
+    .sort({ nombre: 1 })
+    .skip(Number(offset) || 0)
+    .limit(Number(limit) || 50)
+    .lean()
+    .exec();
+  return docs.map(normalize);
 };
 
-/// --- getServiceById(id) acepta mongo _id o id numérico
+/* ---------- getServiceById(id) ---------- */
 const getServiceById = async (id) => {
-  if (mongoReady && ServiceModel) {
-    if (!id) return null;
-    if (typeof id === 'string' && mongoose.Types.ObjectId.isValid(id)) {
-      const doc = await ServiceModel.findById(id).lean().exec();
-      return normalize(doc);
-    }
-    if (!isNaN(Number(id))) {
-      const doc = await ServiceModel.findOne({ oldId: Number(id) }).lean().exec();
-      if (doc) return normalize(doc);
-    }
-    // fallback intento por _id con el valor dado
-    const doc = await ServiceModel.findOne({ _id: id }).lean().exec();
+  if (!mongoReady || !ServiceModel) throw new Error('MongoDB no inicializado');
+  if (!id) return null;
+
+  // si es ObjectId
+  if (isObjectId(String(id))) {
+    const doc = await ServiceModel.findById(String(id)).lean().exec();
     return normalize(doc);
   }
 
-  // sqlite fallback
-  return await sqliteGet('SELECT * FROM services WHERE id = ?', [id]);
+  // si es numérico, buscar por oldId
+  if (!isNaN(Number(id))) {
+    const doc = await ServiceModel.findOne({ oldId: Number(id) }).lean().exec();
+    if (doc) return normalize(doc);
+  }
+
+  // fallback: intentar buscar por _id con el valor dado
+  const doc = await ServiceModel.findOne({ _id: id }).lean().exec();
+  return normalize(doc);
 };
 
-/// --- createService(payload)
-const createService = async (payload) => {
-  const { nombre, descripcion, precio, oldId } = payload || {};
+/* ---------- createService(payload) ---------- */
+const createService = async (payload = {}) => {
+  if (!mongoReady || !ServiceModel) throw new Error('MongoDB no inicializado');
+  const { nombre, descripcion = null, precio = null, oldId = null } = payload;
   if (!nombre) throw new Error('nombre es requerido');
 
-  if (mongoReady && ServiceModel) {
-    const doc = await ServiceModel.create({
-      oldId: oldId != null ? oldId : null,
-      nombre,
-      descripcion: descripcion || null,
-      precio: precio == null ? null : Number(precio),
-    });
-    const saved = await ServiceModel.findById(doc._id).lean().exec();
-    return normalize(saved);
-  }
+  const doc = await ServiceModel.create({
+    oldId: oldId != null ? oldId : null,
+    nombre,
+    descripcion,
+    precio: precio == null ? null : Number(precio)
+  });
 
-  // sqlite fallback
-  const res = await sqliteRun(
-    `INSERT INTO services (nombre, descripcion, precio) VALUES (?, ?, ?)`,
-    [nombre, descripcion || null, precio == null ? null : precio]
-  );
-  return await sqliteGet('SELECT * FROM services WHERE id = ?', [res.lastID]);
+  const saved = await ServiceModel.findById(doc._id).lean().exec();
+  return normalize(saved);
 };
 
-/// --- updateService(id, payload)
+/* ---------- updateService(id, payload) ---------- */
 const updateService = async (id, payload = {}) => {
-  const { nombre, descripcion, precio } = payload;
+  if (!mongoReady || !ServiceModel) throw new Error('MongoDB no inicializado');
 
-  if (mongoReady && ServiceModel) {
-    // localizar por _id o oldId
-    let filter = null;
-    if (typeof id === 'string' && mongoose.Types.ObjectId.isValid(id)) filter = { _id: mongoose.Types.ObjectId(id) };
-    else if (!isNaN(Number(id))) filter = { oldId: Number(id) };
-    else filter = { _id: id };
+  let filter = null;
+  if (isObjectId(String(id))) filter = { _id: mongoose.Types.ObjectId(String(id)) };
+  else if (!isNaN(Number(id))) filter = { oldId: Number(id) };
+  else filter = { _id: id };
 
-    const existing = await ServiceModel.findOne(filter).lean().exec();
-    if (!existing) return null;
-
-    const updateDoc = {
-      nombre: payload.hasOwnProperty('nombre') ? nombre : existing.nombre,
-      descripcion: payload.hasOwnProperty('descripcion') ? (descripcion || null) : existing.descripcion,
-      precio: payload.hasOwnProperty('precio') ? (precio == null ? null : Number(precio)) : existing.precio,
-      updated_at: new Date()
-    };
-
-    await ServiceModel.updateOne(filter, { $set: updateDoc }).exec();
-    const updated = await ServiceModel.findOne(filter).lean().exec();
-    return normalize(updated);
-  }
-
-  // sqlite fallback
-  const existing = await sqliteGet('SELECT * FROM services WHERE id = ?', [id]);
+  const existing = await ServiceModel.findOne(filter).lean().exec();
   if (!existing) return null;
 
-  const finalNombre = payload.hasOwnProperty('nombre') ? nombre : existing.nombre;
-  const finalDescripcion = payload.hasOwnProperty('descripcion') ? descripcion : existing.descripcion;
-  const finalPrecio = payload.hasOwnProperty('precio') ? (precio == null ? null : precio) : existing.precio;
+  const updateDoc = {
+    nombre: payload.hasOwnProperty('nombre') ? payload.nombre : existing.nombre,
+    descripcion: payload.hasOwnProperty('descripcion') ? (payload.descripcion ?? null) : existing.descripcion,
+    precio: payload.hasOwnProperty('precio') ? (payload.precio == null ? null : Number(payload.precio)) : existing.precio,
+    updated_at: new Date()
+  };
 
-  await sqliteRun(
-    `UPDATE services SET nombre = ?, descripcion = ?, precio = ?, created_at = created_at WHERE id = ?`,
-    [finalNombre, finalDescripcion, finalPrecio, id]
-  );
-
-  return await sqliteGet('SELECT * FROM services WHERE id = ?', [id]);
+  await ServiceModel.updateOne(filter, { $set: updateDoc }).exec();
+  const updated = await ServiceModel.findOne(filter).lean().exec();
+  return normalize(updated);
 };
 
-/// --- deleteService(id)
+/* ---------- deleteService(id) ---------- */
 const deleteService = async (id) => {
-  if (mongoReady && ServiceModel) {
-    let filter = null;
-    if (typeof id === 'string' && mongoose.Types.ObjectId.isValid(id)) filter = { _id: mongoose.Types.ObjectId(id) };
-    else if (!isNaN(Number(id))) filter = { oldId: Number(id) };
-    else filter = { _id: id };
+  if (!mongoReady || !ServiceModel) throw new Error('MongoDB no inicializado');
 
-    const res = await ServiceModel.deleteOne(filter).exec();
-    return res.deletedCount > 0;
-  }
+  let filter = null;
+  if (isObjectId(String(id))) filter = { _id: mongoose.Types.ObjectId(String(id)) };
+  else if (!isNaN(Number(id))) filter = { oldId: Number(id) };
+  else filter = { _id: id };
 
-  const res = await sqliteRun('DELETE FROM services WHERE id = ?', [id]);
-  return res.changes > 0;
+  const res = await ServiceModel.deleteOne(filter).exec();
+  return res.deletedCount > 0;
 };
 
 module.exports = {
