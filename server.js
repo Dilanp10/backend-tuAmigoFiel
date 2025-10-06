@@ -84,7 +84,7 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
       server.close(() => console.log('HTTP server cerrado'));
       // cerrar Mongo si está conectada
       try {
-        const { mongoose } = require('./src/config/mongo');
+        const { mongoose } = require('./config/mongo');
         if (mongoose && mongoose.connection && mongoose.connection.readyState === 1) {
           await mongoose.disconnect();
           console.log('Mongo desconectado');
