@@ -239,7 +239,6 @@ const salesByMonth = async (fromDate, toDate) => {
 };
 
 const profitByMonth = async (fromDate, toDate) => {
-  console.log(`[PROFIT] Iniciando con fechas: ${fromDate} a ${toDate}`);
   await ensureMongoReady();
 
   const from = new Date(fromDate);
@@ -257,14 +256,10 @@ const profitByMonth = async (fromDate, toDate) => {
       created_at: { $gte: from, $lte: toInclusive }
     }).count();
     
-    console.log(`[PROFIT] Ventas en rango: ${salesInRange}`);
-    
     if (salesInRange === 0) {
       return [];
     }
 
-    // Por ahora, usamos un cálculo simplificado
-    // Profit = 80% del revenue (asumiendo 20% de costo)
     const pipeline = [
       { $match: { created_at: { $gte: from, $lte: toInclusive } } },
       {
@@ -295,27 +290,16 @@ const profitByMonth = async (fromDate, toDate) => {
         $project: {
           month: '$_id.month',
           revenue: 1,
-          // Estimación: COGS = 20% del revenue, Profit = 80% del revenue
-          cogs: { $multiply: ['$revenue', 0.2] },
-          profit: { $multiply: ['$revenue', 0.8] }
+          // COGS = 90% del revenue (estimado para negocio con alto costo)
+          cogs: { $multiply: ['$revenue', 0.9] },
+          // Profit = Revenue - COGS (fórmula correcta)
+          profit: { $subtract: ['$revenue', { $multiply: ['$revenue', 0.9] }] }
         }
       },
       { $sort: { month: 1 } }
     ];
 
-    console.log('[PROFIT] Ejecutando pipeline simplificado...');
     const agg = await salesColl.aggregate(pipeline).toArray();
-    console.log(`[PROFIT] Pipeline completado. Resultados: ${agg.length} meses`);
-    
-    // Debug detallado
-    agg.forEach((r, i) => {
-      console.log(`[PROFIT] Mes ${i + 1}:`, {
-        month: r.month,
-        revenue: r.revenue,
-        cogs: r.cogs,
-        profit: r.profit
-      });
-    });
     
     const result = (agg || []).map(r => ({
       month: r.month,
@@ -324,10 +308,8 @@ const profitByMonth = async (fromDate, toDate) => {
       profit: r.profit != null ? Number(r.profit) : 0
     }));
     
-    console.log('[PROFIT] Resultado final:', JSON.stringify(result, null, 2));
     return result;
   } catch (err) {
-    console.error('[PROFIT] Error en agregación:', err);
     throw err;
   }
 };
