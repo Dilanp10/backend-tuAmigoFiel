@@ -2,26 +2,33 @@
 const cron = require('node-cron');
 const alertsService = require('../services/alertsService');
 
-const schedule = process.env.ALERT_CRON || '0 8 * * *'; // por defecto: todos los días 08:00
+
+const schedule = process.env.ALERT_CRON || '*/5 * * * *'; // ← Cada 5 minutos
 
 const start = () => {
   console.log('[alertsJob] Iniciando job de alertas con cron:', schedule);
 
-  // correr al arrancar una primera vez (opcional)
-  alertsService.checkAndCreateAlerts().then(created => {
-    if (created && created.length) {
-      console.log(`[alertsJob] Alertas creadas al inicio: ${created.length}`);
-    } else {
-      console.log('[alertsJob] No se crearon alertas en el inicio.');
+  
+  setTimeout(async () => {
+    try {
+      console.log('[alertsJob] Ejecutando primera verificación de alertas...');
+      const created = await alertsService.checkAndCreateAlerts();
+      console.log(`[alertsJob] Primera verificación - ${created.length} alertas creadas`);
+    } catch (err) {
+      console.error('[alertsJob] Error en primera verificación:', err);
     }
-  }).catch(err => console.error('[alertsJob] Error inicial', err));
+  }, 10000); // 10 segundos después del inicio
 
-  // programar el job
+  // programar el job recurrente
   cron.schedule(schedule, async () => {
-    console.log('[alertsJob] Ejecutando chequeo de alertas...');
+    console.log('[alertsJob] Ejecutando chequeo periódico de alertas...');
     try {
       const created = await alertsService.checkAndCreateAlerts();
-      console.log('[alertsJob] checkAndCreateAlerts finalizado — nuevas alertas:', (created && created.length) || 0);
+      if (created.length > 0) {
+        console.log(`[alertsJob] ${created.length} nuevas alertas creadas`);
+      } else {
+        console.log('[alertsJob] No hay nuevas alertas');
+      }
     } catch (err) {
       console.error('[alertsJob] Error en checkAndCreateAlerts', err);
     }
