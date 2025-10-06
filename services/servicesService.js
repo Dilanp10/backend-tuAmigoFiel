@@ -1,6 +1,6 @@
 // src/services/servicesService.js
-const { all: sqliteAll, get: sqliteGet, run: sqliteRun } = require('./config/db.js');
-const { connectMongo, mongoose } = require('./config/mongo');
+const { all: sqliteAll, get: sqliteGet, run: sqliteRun } = require('../config/db.js');
+const { connectMongo, mongoose } = require('../config/mongo');
 
 /// --- Asegurar tabla SQLite (mantener comportamiento existente)
 const ensure = async () => {

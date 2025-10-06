@@ -1,6 +1,6 @@
 // src/services/reportsService.js
-const { all: sqliteAll } = require('./config/db.js');
-const { connectMongo, mongoose } = require('./config/mongo');
+const { all: sqliteAll } = require('../config/db.js');
+const { connectMongo, mongoose } = require('../config/mongo');
 
 let mongoReady = false;
 

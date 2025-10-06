@@ -1,6 +1,6 @@
 // src/services/productosService.js
-const { connectMongo, mongoose } = require('./config/mongo');
-const { all: sqliteAll, get: sqliteGet, run: sqliteRun } = require('./config/db.js');
+const { connectMongo, mongoose } = require('../config/mongo');
+const { all: sqliteAll, get: sqliteGet, run: sqliteRun } = require('../config/db.js');
 
 /**
  * Mantengo el intento de agregar columnas en sqlite (no cambiar).

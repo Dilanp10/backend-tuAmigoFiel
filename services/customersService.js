@@ -1,6 +1,6 @@
 // src/services/customersService.js
-const { connectMongo, mongoose } = require('./config/mongo');
-const { all: sqliteAll, get: sqliteGet, run: sqliteRun } = require('./config/db.js'); // fallback sqlite
+const { connectMongo, mongoose } = require('../config/mongo');
+const { all: sqliteAll, get: sqliteGet, run: sqliteRun } = require('../config/db.js'); // fallback sqlite
 
 const { Schema } = mongoose;
 
