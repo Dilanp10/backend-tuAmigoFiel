@@ -7,6 +7,7 @@ let mongoReady = false;
  * init(): conectar a Mongo (usa process.env.MONGO_URI desde config/mongo.js)
  */
 const init = async () => {
+  console.log('[DEBUG] reportsService.init() llamado');
   try {
     await connectMongo();
     mongoReady = true;
@@ -19,11 +20,21 @@ const init = async () => {
 };
 
 /**
+ * Helpers
+ */
+const ensureMongoReady = async () => {
+  if (!mongoReady) {
+    console.log('🔄 Auto-inicializando reportsService...');
+    await init();
+  }
+};
+
+/**
  * salesByMonth(fromDate, toDate)
  * fromDate/toDate: strings parseables por Date (ej. '2024-01-01')
  */
 const salesByMonth = async (fromDate, toDate) => {
-  if (!mongoReady) throw new Error('reportsService: MongoDB no inicializado. Llamá a init() primero.');
+  await ensureMongoReady();
 
   // Validar fechas
   const from = new Date(fromDate);
@@ -112,7 +123,7 @@ const salesByMonth = async (fromDate, toDate) => {
  * profitByMonth(fromDate, toDate)
  */
 const profitByMonth = async (fromDate, toDate) => {
-  if (!mongoReady) throw new Error('reportsService: MongoDB no inicializado. Llamá a init() primero.');
+  await ensureMongoReady();
 
   const from = new Date(fromDate);
   const to = new Date(toDate);
