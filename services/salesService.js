@@ -1,4 +1,4 @@
-// src/services/salesService.js
+// services/salesService.js
 const { connectMongo, mongoose } = require('../config/mongo');
 const productosService = require('./productosService');
 const customersService = require('./customersService');
@@ -54,26 +54,42 @@ SaleSchema.set('toJSON', {
 
 /* ---------- init() ---------- */
 const init = async () => {
-  await connectMongo();
-  mongoReady = true;
-  SaleModel = mongoose.models.Sale || mongoose.model('Sale', SaleSchema);
-
+  console.log('[DEBUG] salesService.init() llamado');
   try {
-    await SaleModel.collection.createIndex({ oldId: 1 });
-    await SaleModel.collection.createIndex({ customerRef: 1 });
-    await SaleModel.collection.createIndex({ oldCustomerId: 1 });
-    await SaleModel.collection.createIndex({ created_at: -1 });
-    console.log('[salesService] índices creados/verificados');
+    await connectMongo();
+    mongoReady = true;
+    SaleModel = mongoose.models.Sale || mongoose.model('Sale', SaleSchema);
+    console.log('[DEBUG] salesService inicializado');
+
+    try {
+      await SaleModel.collection.createIndex({ oldId: 1 });
+      await SaleModel.collection.createIndex({ customerRef: 1 });
+      await SaleModel.collection.createIndex({ oldCustomerId: 1 });
+      await SaleModel.collection.createIndex({ created_at: -1 });
+      console.log('[salesService] índices creados/verificados');
+    } catch (err) {
+      console.warn('[salesService] fallo creando índices (quizá ya existían):', err.message || err);
+    }
   } catch (err) {
-    console.warn('[salesService] fallo creando índices (quizá ya existían):', err.message || err);
+    console.error('[DEBUG] Error en salesService.init():', err);
+    throw err;
   }
 };
 
 /* ---------- Helpers ---------- */
 const isObjectId = (val) => typeof val === 'string' && mongoose.Types.ObjectId.isValid(val);
 
+const ensureMongoReady = async () => {
+  if (!mongoReady || !SaleModel) {
+    console.log('🔄 Auto-inicializando salesService...');
+    await init();
+  }
+};
+
 /* ---------- normalizeSale (mongo) ---------- */
 const normalizeSale = async (doc) => {
+  await ensureMongoReady();
+  
   if (!doc) return null;
   const sale = {
     id: doc.id || (doc._id ? String(doc._id) : (doc.oldId != null ? String(doc.oldId) : null)),
@@ -118,6 +134,8 @@ const normalizeSale = async (doc) => {
  * options: { customerId, onCredit, paidAmount }
  */
 const createSale = async (cart = [], options = {}) => {
+  await ensureMongoReady();
+  
   if (!Array.isArray(cart) || cart.length === 0) throw new Error('Carrito vacío');
 
   const {
@@ -175,15 +193,13 @@ const createSale = async (cart = [], options = {}) => {
   const outstanding = onCredit ? Math.max(0, total - paid) : 0;
   const finalPaidAmount = onCredit ? Math.min(paid, total) : total;
 
-  if (!mongoReady || !SaleModel) throw new Error('MongoDB no inicializado');
-
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
     const saleDocArray = await SaleModel.create([{
       oldId: null,
       items: itemsToSave.map(it => ({
-        productRef: (it.product && it.product.id && isObjectId(String(it.product.id))) ? mongoose.Types.ObjectId(String(it.product.id)) : null,
+        productRef: (it.product && it.product.id && isObjectId(String(it.product.id))) ? new mongoose.Types.ObjectId(String(it.product.id)) : null, // ✅ CORREGIDO
         oldProductId: (it.product && it.product.id && !isObjectId(String(it.product.id))) ? it.product.id : null,
         serviceRef: null,
         oldServiceId: (it.service && it.service.id && !isObjectId(String(it.service.id))) ? it.service.id : null,
@@ -192,7 +208,7 @@ const createSale = async (cart = [], options = {}) => {
         unit_cost: it.unitCost,
         line_total: it.line_total
       })),
-      customerRef: (customerId && isObjectId(String(customerId))) ? mongoose.Types.ObjectId(String(customerId)) : null,
+      customerRef: (customerId && isObjectId(String(customerId))) ? new mongoose.Types.ObjectId(String(customerId)) : null, // ✅ CORREGIDO
       oldCustomerId: (customerId && !isObjectId(String(customerId))) ? customerId : null,
       total,
       total_items: totalItems,
@@ -221,7 +237,7 @@ const createSale = async (cart = [], options = {}) => {
           // mongo product id -> update collection directly in session
           try {
             await mongoose.connection.collection('products').updateOne(
-              { _id: mongoose.Types.ObjectId(String(ln.product.id)), stock: { $ne: null } },
+              { _id: new mongoose.Types.ObjectId(String(ln.product.id)), stock: { $ne: null } }, // ✅ CORREGIDO
               { $inc: { stock: -ln.qty } },
               { session }
             );
@@ -246,7 +262,7 @@ const createSale = async (cart = [], options = {}) => {
 
 /* ---------- listSales ---------- */
 const listSales = async ({ from, to, limit = 100, offset = 0, customerId, creditOnly = false } = {}) => {
-  if (!mongoReady || !SaleModel) throw new Error('MongoDB no inicializado');
+  await ensureMongoReady();
 
   const match = {};
   if (from) {
@@ -262,7 +278,7 @@ const listSales = async ({ from, to, limit = 100, offset = 0, customerId, credit
   }
 
   if (customerId) {
-    if (typeof customerId === 'string' && isObjectId(customerId)) match.customerRef = mongoose.Types.ObjectId(customerId);
+    if (typeof customerId === 'string' && isObjectId(customerId)) match.customerRef = new mongoose.Types.ObjectId(customerId); // ✅ CORREGIDO
     else if (!isNaN(Number(customerId))) match.oldCustomerId = Number(customerId);
     else match.customerRef = customerId;
   }
@@ -283,8 +299,9 @@ const listSales = async ({ from, to, limit = 100, offset = 0, customerId, credit
 
 /* ---------- getSaleById ---------- */
 const getSaleById = async (id) => {
+  await ensureMongoReady();
+  
   if (!id) return null;
-  if (!mongoReady || !SaleModel) throw new Error('MongoDB no inicializado');
 
   if (isObjectId(String(id))) {
     const doc = await SaleModel.findById(String(id)).lean().exec();
@@ -300,9 +317,10 @@ const getSaleById = async (id) => {
 
 /* ---------- updateSalePayment ---------- */
 const updateSalePayment = async (saleId, paidAmount) => {
+  await ensureMongoReady();
+  
   const amt = Number(paidAmount);
   if (!Number.isFinite(amt) || amt <= 0) throw new Error('amount inválido');
-  if (!mongoReady || !SaleModel) throw new Error('MongoDB no inicializado');
 
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -335,10 +353,10 @@ const updateSalePayment = async (saleId, paidAmount) => {
 
 /* ---------- getCustomerOutstanding ---------- */
 const getCustomerOutstanding = async (customerId) => {
-  if (!mongoReady || !SaleModel) throw new Error('MongoDB no inicializado');
+  await ensureMongoReady();
 
   const match = {};
-  if (typeof customerId === 'string' && isObjectId(customerId)) match.customerRef = mongoose.Types.ObjectId(customerId);
+  if (typeof customerId === 'string' && isObjectId(customerId)) match.customerRef = new mongoose.Types.ObjectId(customerId); // ✅ CORREGIDO
   else if (!isNaN(Number(customerId))) match.oldCustomerId = Number(customerId);
   else match.customerRef = customerId;
 
@@ -356,10 +374,10 @@ const getCustomerOutstanding = async (customerId) => {
 
 /* ---------- deleteSalesByCustomerId ---------- */
 const deleteSalesByCustomerId = async (customerId) => {
-  if (!mongoReady || !SaleModel) throw new Error('MongoDB no inicializado');
+  await ensureMongoReady();
 
   const filter = {};
-  if (typeof customerId === 'string' && isObjectId(customerId)) filter.customerRef = mongoose.Types.ObjectId(customerId);
+  if (typeof customerId === 'string' && isObjectId(customerId)) filter.customerRef = new mongoose.Types.ObjectId(customerId); // ✅ CORREGIDO
   else if (!isNaN(Number(customerId))) filter.oldCustomerId = Number(customerId);
   else filter.customerRef = customerId;
 

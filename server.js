@@ -37,6 +37,16 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
     }
 
     // 2) Inicializar servicios (EN RAÍZ)
+
+    try {
+  const salesService = require('./services/salesService');
+  if (salesService && typeof salesService.init === 'function') {
+    await salesService.init();
+    console.log('[server] salesService inicializado');
+  }
+} catch (err) {
+  console.warn('[server] No se pudo inicializar salesService:', err.message);
+}
     try {
       const alertsService = require('./services/alertsService'); // ← SIN src/
       if (alertsService && typeof alertsService.init === 'function') {
