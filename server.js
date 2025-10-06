@@ -1,9 +1,9 @@
-// server.js
+// server.js - VERSIÓN CORREGIDA PARA ESTRUCTURA EN RAÍZ
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
-// Rutas (ajusta si algún archivo está en otra carpeta)
+// Rutas (EN RAÍZ - sin src/)
 const authRoutes = require('./routes/auth');
 const productosRoutes = require('./routes/productos');
 const salesRoutes = require('./routes/sales');
@@ -21,24 +21,24 @@ const PORT = process.env.PORT || 4000;
 app.use(cors());
 app.use(express.json());
 
-// Healthcheck (se deja disponible antes del init para response simple)
+// Healthcheck
 app.get('/', (req, res) => res.send('API backend funcionando'));
 
-// Async init: conectar a Mongo, inicializar services y jobs, luego montar rutas y arrancar server
+// Async init
 (async function initApp() {
   try {
-    // 1) Conectar a Mongo (archivo: src/config/mongo.js)
+    // 1) Conectar a Mongo (EN RAÍZ)
     try {
-      const { connectMongo } = require('./config/mongo');
+      const { connectMongo } = require('./config/mongo'); // ← SIN src/
       await connectMongo();
       console.log('[server] Conexión a Mongo OK');
     } catch (err) {
-      console.warn('[server] No se pudo conectar a Mongo (si no lo tenés configurado está bien por ahora):', err.message);
+      console.warn('[server] No se pudo conectar a Mongo:', err.message);
     }
 
-    // 2) Inicializar servicios que requieran setup (índices, modelos)
+    // 2) Inicializar servicios (EN RAÍZ)
     try {
-      const alertsService = require('./src/services/alertsService');
+      const alertsService = require('./services/alertsService'); // ← SIN src/
       if (alertsService && typeof alertsService.init === 'function') {
         await alertsService.init();
         console.log('[server] alertsService inicializado');
@@ -48,7 +48,7 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
     }
 
     try {
-      const productosService = require('./src/services/productosService');
+      const productosService = require('./services/productosService'); // ← SIN src/
       if (productosService && typeof productosService.init === 'function') {
         await productosService.init();
         console.log('[server] productosService inicializado');
@@ -58,7 +58,7 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
     }
 
     try {
-      const customersService = require('./src/services/customersService');
+      const customersService = require('./services/customersService'); // ← SIN src/
       if (customersService && typeof customersService.init === 'function') {
         await customersService.init();
         console.log('[server] customersService inicializado');
@@ -68,7 +68,7 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
     }
 
     try {
-      const servicesService = require('./src/services/servicesService');
+      const servicesService = require('./services/servicesService'); // ← SIN src/
       if (servicesService && typeof servicesService.init === 'function') {
         await servicesService.init();
         console.log('[server] servicesService inicializado');
@@ -77,10 +77,10 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
       console.warn('[server] No se pudo inicializar servicesService:', err.message);
     }
 
-    // Ruta manual para generar alertas (TEMPORAL - para testing)
+    // Ruta manual para generar alertas (TEMPORAL)
     app.get('/api/alerts/generate', async (req, res) => {
       try {
-        const alertsService = require('./src/services/alertsService');
+        const alertsService = require('./services/alertsService'); // ← SIN src/
         console.log('[DEBUG] Generando alertas manualmente...');
         const created = await alertsService.checkAndCreateAlerts();
         res.json({ 
@@ -97,7 +97,7 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
       }
     });
 
-    // 3) Montar rutas (después de init para que controllers puedan usar servicios inicializados)
+    // 3) Montar rutas
     app.use('/api', authRoutes);
     app.use('/api/products', productosRoutes);
     app.use('/api/sales', salesRoutes);
@@ -113,14 +113,12 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
       console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
     });
 
-    // 5) Arrancar job de alertas si existe
+    // 5) Arrancar job de alertas (EN RAÍZ)
     try {
-      const { start: startAlertsJob } = require('./src/jobs/alertsJob');
+      const { start: startAlertsJob } = require('./jobs/alertsJob'); // ← SIN src/
       if (typeof startAlertsJob === 'function') {
         startAlertsJob();
         console.log('[server] alertsJob arrancado');
-      } else {
-        console.warn('[server] start function not found in ./src/jobs/alertsJob');
       }
     } catch (err) {
       console.error('[server] No se pudo arrancar alertsJob:', err.message);
