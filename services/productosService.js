@@ -56,6 +56,18 @@ const isObjectId = (val) => typeof val === 'string' && mongoose.Types.ObjectId.i
 
 const normalize = (doc) => {
   if (!doc) return null;
+  
+  // Convertir vencimiento a string en formato YYYY-MM-DD
+  let vencimientoNormalizado = null;
+  if (doc.vencimiento) {
+    if (doc.vencimiento instanceof Date) {
+      vencimientoNormalizado = doc.vencimiento.toISOString().split('T')[0];
+    } else if (typeof doc.vencimiento === 'string') {
+      // Si ya es string, asegurar formato YYYY-MM-DD
+      vencimientoNormalizado = doc.vencimiento.split('T')[0];
+    }
+  }
+  
   return {
     id: doc.id || (doc._id ? String(doc._id) : (doc.oldId != null ? String(doc.oldId) : null)),
     nombre: doc.nombre,
@@ -64,7 +76,7 @@ const normalize = (doc) => {
     precio: doc.precio != null ? Number(doc.precio) : null,
     categoria: doc.categoria ?? null,
     imagen: doc.imagen ?? null,
-    vencimiento: doc.vencimiento ?? null,
+    vencimiento: vencimientoNormalizado, // ← Usar fecha normalizada
     stock: doc.stock != null ? Number(doc.stock) : null,
     cost: doc.cost != null ? Number(doc.cost) : 0,
     created_at: doc.created_at || doc.createdAt || null,
