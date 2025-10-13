@@ -1,4 +1,4 @@
-// server.js - VERSIÓN CORREGIDA CON CORS
+// server.js - VERSIÓN CORREGIDA CON CORS (acepta subdominios de netlify.app)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -7,30 +7,44 @@ const cors = require('cors');
 // 🚨 CONFIGURACIÓN DE CORS (SOLUCIÓN AL PROBLEMA)
 // ==========================================================
 
-// PASO 1: Define tu lista de orígenes permitidos (Whitelist)
+// Lista base de orígenes permitidos (puedes ajustar)
 const allowedOrigins = [
-  // ⚠️ ¡IMPORTANTE! REEMPLAZA ESTE VALOR CON EL DOMINIO EXACTO DE TU NETLIFY
-  'https://68e435b14155bbbdfb6e5fd0--timely-churros-9d5736.netlify.app', 
-  
-  // Origen para desarrollo local
-  'http://localhost:4000', 
+  // Si tenés un dominio fijo de producción, añadilo aquí (opcional)
+  // 'https://mi-front-produccion.netlify.app',
+
+  // Dominios locales para desarrollo
+  'http://localhost:4000',
   'http://localhost:3000',
 ];
 
-// PASO 2: Crea la configuración CORS
+// Permite cualquier subdominio de netlify.app (previews + deploys)
+const isNetlifyOrigin = (origin) => {
+  if (!origin) return false;
+  try {
+    const hostname = new URL(origin).hostname;
+    // Acepta *.netlify.app (ej: something--sitename.netlify.app)
+    return /\.netlify\.app$/.test(hostname);
+  } catch (e) {
+    return false;
+  }
+};
+
 const corsOptions = {
   origin: (origin, callback) => {
-    // Permitir si el origen está en la lista O si la petición no tiene origen (caso Postman)
-    if (allowedOrigins.includes(origin) || !origin) {
-      callback(null, true);
-    } else {
-      // Bloquear si el origen no está permitido
-      callback(new Error('Acceso no permitido por CORS'));
+    // Permitir requests sin origin (ej: curl, Postman, servidores)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin) || isNetlifyOrigin(origin)) {
+      return callback(null, true);
     }
+
+    console.warn('[CORS] Origen bloqueado:', origin);
+    return callback(new Error('Acceso no permitido por CORS'));
   },
-  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+  methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
   credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  preflightContinue: false,
 };
 
 // ==========================================================
@@ -49,7 +63,8 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Middlewares
-app.use(cors(corsOptions)); // <--- ¡AQUÍ SE APLICA LA CONFIGURACIÓN CORREGIDA!
+app.use(cors(corsOptions));           // aplica CORS a todas las rutas
+app.options('*', cors(corsOptions));  // responde a preflight OPTIONS
 app.use(express.json());
 
 // Healthcheck
