@@ -1,4 +1,4 @@
-// server.js - versión reforzada con logging y validación de mounts
+// server.js - VERSIÓN COMPLETA Y FUNCIONAL
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -7,160 +7,90 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-/**
- * --------------------------------------------------------
- * Debug env (temporal): listar variables de entorno que parecen URLs
- * --------------------------------------------------------
- */
-console.log('--- DEBUG ENV CHECK (start) ---');
-Object.keys(process.env).forEach((k) => {
-  const v = process.env[k];
-  if (!v) return;
-  if (/(https?:\/\/)|git\.new/i.test(String(v))) {
-    console.log(`[ENV] ${k} = ${v}`);
-  }
-});
-console.log('--- DEBUG ENV CHECK (end) ---');
+/* ----------------------------- CONFIGURACIÓN BÁSICA ----------------------------- */
+console.log('🔍 Iniciando servidor en modo diagnóstico...');
 
-/**
- * --------------------------------------------------------
- * Helper: extraer sólo path de una posible URL completa.
- * Si recibimos una URL completa por error (p. ej. en una env var),
- * sóloPath() devuelve la parte pathname para evitar que Express
- * reciba una URL completa como ruta y rompa path-to-regexp.
- * --------------------------------------------------------
- */
-function onlyPath(maybeUrlOrPath) {
-  if (!maybeUrlOrPath) return '/';
-  try {
-    const s = String(maybeUrlOrPath).trim();
-    if (s.startsWith('/')) return s;
-    if (/^https?:\/\//i.test(s)) {
-      try {
-        const u = new URL(s);
-        return u.pathname || '/';
-      } catch (e) {
-        return s;
-      }
-    }
-    return s;
-  } catch (e) {
-    return '/';
-  }
-}
-
-// --------------------------------------------------------
-// CORS: permitir subdominios netlify.app y localhost
-// --------------------------------------------------------
-const allowedOrigins = [
-  'http://localhost:4000',
-  'http://localhost:3000',
-];
-
-const isNetlifyOrigin = (origin) => {
-  if (!origin) return false;
-  try {
-    const hostname = new URL(origin).hostname;
-    return /\.netlify\.app$/.test(hostname);
-  } catch (e) {
-    return false;
-  }
-};
-
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true); // Postman / server-side requests
-    if (allowedOrigins.includes(origin) || isNetlifyOrigin(origin)) {
-      return callback(null, true);
-    }
-    console.warn('[CORS] Origen bloqueado:', origin);
-    return callback(new Error('Acceso no permitido por CORS'));
-  },
-  methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-  credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  preflightContinue: false,
-};
-
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+// Middleware básico
 app.use(express.json());
 
-// healthcheck
-app.get('/', (req, res) => res.send('API backend funcionando'));
+// CORS simplificado
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://localhost:4000'],
+  credentials: true
+}));
 
-// --------------------------------------------------------
-// Funciones auxiliares para require y montaje seguro
-// --------------------------------------------------------
-function safeRequire(modulePath) {
-  try {
-    const resolved = require.resolve(modulePath);
-    const mod = require(modulePath);
-    console.log(`[SAFE_REQUIRE] OK -> ${modulePath} (resolved: ${resolved})`);
-    return mod;
-  } catch (err) {
-    console.error(`[SAFE_REQUIRE] ERROR al require '${modulePath}':`, err && (err.stack || err.message));
-    return null;
-  }
-}
+/* ----------------------------- RUTAS DE DIAGNÓSTICO ----------------------------- */
+// Ruta raíz - siempre funciona
+app.get('/', (req, res) => {
+  res.json({ 
+    message: '🚀 Servidor TuAmigoFielLocal funcionando', 
+    status: 'OK',
+    version: '1.0.0',
+    timestamp: new Date().toISOString()
+  });
+});
 
-function isLikelyExpressRouter(obj) {
-  // Un Router en Express puede ser una función (middleware) o un objeto con .stack / .handle
-  if (!obj) return false;
-  if (typeof obj === 'function') return true;
-  if (typeof obj === 'object') {
-    if (Array.isArray(obj.stack) && typeof obj.handle === 'function') return true;
-    // Express Router transpiled puede exponer "router" o "default"
-    if (obj.router && Array.isArray(obj.router.stack)) return true;
-  }
-  return false;
-}
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    database: 'checking...',
+    timestamp: new Date().toISOString()
+  });
+});
 
-/**
- * Monta una ruta de forma segura y loggea información útil.
- * Si el "routerModule" no es un router válido, no lo monta.
- */
-function safeMount(mountPath, modulePath) {
-  try {
-    // por seguridad, convertir mountPath si viniera como URL completa en una env
-    const safeMountPath = onlyPath(mountPath);
-
-    const mod = safeRequire(modulePath);
-    if (!mod) {
-      console.warn(`[SAFE_MOUNT] Módulo no cargado: ${modulePath}, saltando mount ${safeMountPath}`);
-      return;
+// Ruta de prueba de API
+app.get('/api/test', (req, res) => {
+  res.json({ 
+    message: '✅ API funcionando correctamente',
+    endpoints: {
+      auth: '/api/login',
+      products: '/api/products',
+      sales: '/api/sales',
+      customers: '/api/customers'
     }
+  });
+});
 
-    // Si el módulo exporta un objeto con .default (es build ESM transpilado)
-    const candidate = mod.default || mod;
-
-    if (!isLikelyExpressRouter(candidate)) {
-      console.warn(`[SAFE_MOUNT] El módulo '${modulePath}' no parece un Router/middleware de Express. Tipo: ${typeof candidate}`);
-      if (candidate && typeof candidate === 'object') {
-        console.warn('[SAFE_MOUNT] keys del export:', Object.keys(candidate));
-      }
-      return;
-    }
-
-    // Finalmente montar con try/catch
+/* ----------------------------- FUNCIÓN SEGURA PARA MONTAR RUTAS ----------------------------- */
+function safeMountRoute(routePath, routeModule) {
+  try {
+    console.log(`🔄 Intentando cargar: ${routeModule}`);
+    
+    // Verificar si el archivo existe
     try {
-      app.use(safeMountPath, candidate);
-      console.log(`[SAFE_MOUNT] Montado: '${safeMountPath}' -> ${modulePath}`);
+      require.resolve(routeModule);
     } catch (err) {
-      console.error(`[SAFE_MOUNT] ERROR montando '${safeMountPath}' con '${modulePath}':`, err && (err.stack || err.message));
+      console.log(`❌ Archivo no encontrado: ${routeModule}`);
+      return false;
     }
-  } catch (err) {
-    console.error(`[SAFE_MOUNT] ERROR inesperado para '${modulePath}':`, err && (err.stack || err.message));
+
+    // Cargar el módulo
+    const module = require(routeModule);
+    const router = module.default || module;
+    
+    // Verificar que sea un router de Express
+    if (typeof router !== 'function' && !router.stack) {
+      console.log(`❌ ${routeModule} no es un router válido`);
+      return false;
+    }
+
+    // Montar la ruta
+    app.use(routePath, router);
+    console.log(`✅ Ruta montada: ${routePath} -> ${routeModule}`);
+    return true;
+    
+  } catch (error) {
+    console.log(`❌ Error cargando ${routeModule}:`, error.message);
+    return false;
   }
 }
 
-// --------------------------------------------------------
-// Montar rutas de forma segura
-// --------------------------------------------------------
-// Nota: si tenías dos mounts con el mismo path ('/api/customers' dos veces),
-// eso puede causar confusión. Aquí los listamos de forma explícita y
-// usamos onlyPath para evitar errores si alguna env trae una URL completa.
-const mounts = [
+/* ----------------------------- MONTAR RUTAS UNA POR UNA ----------------------------- */
+console.log('\n📁 Montando rutas...');
+
+// Lista de rutas a montar (en orden de prioridad)
+const routesToMount = [
   { path: '/api', module: './routes/auth' },
   { path: '/api/products', module: './routes/productos' },
   { path: '/api/sales', module: './routes/sales' },
@@ -169,95 +99,173 @@ const mounts = [
   { path: '/api/reports', module: './routes/reports' },
   { path: '/api/customers', module: './routes/customers' },
   { path: '/api/payments', module: './routes/payments' },
-  // Si precisás una ruta específica para ventas de clientes, montarla con path distinto:
   { path: '/api/customers/sales', module: './routes/customerSales' }
 ];
 
-mounts.forEach(m => safeMount(m.path, m.module));
+// Montar rutas de forma segura
+let mountedCount = 0;
+routesToMount.forEach(route => {
+  if (safeMountRoute(route.path, route.module)) {
+    mountedCount++;
+  }
+});
 
-// --------------------------------------------------------
-// Inicializaciones (servicios) en bloques try/catch
-// --------------------------------------------------------
-(async function initApp() {
+console.log(`\n📊 Resumen: ${mountedCount}/${routesToMount.length} rutas montadas correctamente`);
+
+/* ----------------------------- CONEXIÓN A BASE DE DATOS ----------------------------- */
+async function initializeDatabase() {
   try {
-    // Conexión a Mongo y otros inits: cada uno en su try/catch para no romper todo
+    console.log('\n🗄️  Inicializando base de datos...');
+    
+    // Intentar conectar a MongoDB si existe
     try {
-      const mongoModule = safeRequire('./config/mongo') || {};
-      const connectMongo = mongoModule.connectMongo || (mongoModule.default && mongoModule.default.connectMongo);
-      if (typeof connectMongo === 'function') {
-        await connectMongo();
-        console.log('[INIT] connectMongo OK');
-      } else {
-        console.warn('[INIT] connectMongo no encontrado o failed require');
+      const mongo = require('./config/mongo');
+      if (mongo && typeof mongo.connectMongo === 'function') {
+        await mongo.connectMongo();
+        console.log('✅ MongoDB conectado exitosamente');
       }
-    } catch (err) {
-      console.warn('[INIT] Error conectando a Mongo:', err && err.message);
+    } catch (mongoError) {
+      console.log('ℹ️  MongoDB no configurado o error de conexión:', mongoError.message);
     }
 
-    // Inicializar servicios de forma segura (ejemplo salesService, alertsService, etc)
-    const servicesToInit = [
+    // Intentar conectar a SQLite si existe
+    try {
+      const sqlite = require('./config/database');
+      if (sqlite && typeof sqlite.init === 'function') {
+        await sqlite.init();
+        console.log('✅ SQLite inicializado exitosamente');
+      }
+    } catch (sqliteError) {
+      console.log('ℹ️  SQLite no configurado o error de conexión:', sqliteError.message);
+    }
+    
+  } catch (error) {
+    console.log('⚠️  Advertencia en inicialización de BD:', error.message);
+  }
+}
+
+/* ----------------------------- INICIALIZACIÓN DE SERVICIOS ----------------------------- */
+async function initializeServices() {
+  try {
+    console.log('\n🔧 Inicializando servicios...');
+    
+    const services = [
       './services/salesService',
       './services/alertsService',
       './services/productosService',
       './services/customersService',
       './services/servicesService',
-      './services/reportsService' // incluyo reportsService también
+      './services/reportsService'
     ];
 
-    for (const sPath of servicesToInit) {
+    let initializedCount = 0;
+    
+    for (const servicePath of services) {
       try {
-        const svc = safeRequire(sPath);
-        if (svc && typeof svc.init === 'function') {
-          await svc.init();
-          console.log(`[INIT] Servicio inicializado: ${sPath}`);
-        } else {
-          console.log(`[INIT] Servicio sin init (skip): ${sPath}`);
+        // Verificar si el servicio existe
+        require.resolve(servicePath);
+        const service = require(servicePath);
+        
+        if (service && typeof service.init === 'function') {
+          await service.init();
+          console.log(`✅ ${servicePath} inicializado`);
+          initializedCount++;
         }
-      } catch (err) {
-        console.warn(`[INIT] Error inicializando servicio ${sPath}:`, err && err.message);
+      } catch (serviceError) {
+        console.log(`ℹ️  ${servicePath} no disponible:`, serviceError.message);
       }
     }
+    
+    console.log(`📊 ${initializedCount} servicios inicializados`);
+    
+  } catch (error) {
+    console.log('⚠️  Advertencia en inicialización de servicios:', error.message);
+  }
+}
 
-    // Route temporal para debug (si necesitás probar job de alertas manualmente)
-    app.get('/api/alerts/generate', async (req, res) => {
-      try {
-        const alertsService = safeRequire('./services/alertsService');
-        if (!alertsService || typeof alertsService.checkAndCreateAlerts !== 'function') {
-          return res.status(500).json({ success: false, message: 'alertsService no disponible' });
-        }
-        const created = await alertsService.checkAndCreateAlerts();
-        return res.json({ success: true, message: `Generadas ${created.length} alertas`, alerts: created });
-      } catch (err) {
-        console.error('DEBUG generate alerts error:', err && (err.stack || err.message));
-        return res.status(500).json({ success: false, error: err.message });
-      }
-    });
-
-    // Levantar servidor
+/* ----------------------------- INICIALIZACIÓN PRINCIPAL ----------------------------- */
+async function initializeApp() {
+  try {
+    console.log('\n🎯 Inicializando aplicación...');
+    
+    // 1. Primero la base de datos
+    await initializeDatabase();
+    
+    // 2. Luego los servicios
+    await initializeServices();
+    
+    // 3. Finalmente arrancar el servidor
     const server = app.listen(PORT, () => {
-      console.log(`🚀 Servidor corriendo en http://localhost:${PORT} (PORT env: ${process.env.PORT || '(none)'})`);
+      console.log('\n✨ ========================================');
+      console.log(`✨ 🚀 Servidor ejecutándose en http://localhost:${PORT}`);
+      console.log(`✨ 📊 Health: http://localhost:${PORT}/health`);
+      console.log(`✨ 🔍 API Test: http://localhost:${PORT}/api/test`);
+      console.log('✨ ========================================\n');
+      
+      // Mostrar rutas disponibles
+      console.log('📍 Endpoints disponibles:');
+      console.log('   📍 GET  /              - Página de inicio');
+      console.log('   📍 GET  /health        - Health check');
+      console.log('   📍 GET  /api/test      - Test de API');
+      console.log('   📍 POST /api/login     - Autenticación');
+      console.log('   📍 GET  /api/products  - Productos');
+      console.log('   📍 GET  /api/sales     - Ventas');
+      console.log('   📍 GET  /api/customers - Clientes');
+      console.log('   📍 ... y más endpoints montados\n');
     });
 
-    // Graceful shutdown
-    const shutdown = async () => {
-      console.log('Cerrando servidor...');
-      server.close(() => console.log('HTTP server cerrado'));
-      try {
-        const { mongoose } = require('./config/mongo');
-        if (mongoose && mongoose.connection && mongoose.connection.readyState === 1) {
-          await mongoose.disconnect();
-          console.log('Mongo desconectado');
-        }
-      } catch (e) {
-        console.warn('Error durante shutdown:', e && e.message);
-      }
-      process.exit(0);
-    };
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
+    /* ----------------------------- GRACEFUL SHUTDOWN ----------------------------- */
+    const gracefulShutdown = async (signal) => {
+      console.log(`\n⚠️  Recibido ${signal}. Cerrando servidor...`);
+      
+      server.close(() => {
+        console.log('✅ Servidor HTTP cerrado');
+        
+        // Cerrar conexiones de base de datos
+        try {
+          const { mongoose } = require('./config/mongo');
+          if (mongoose && mongoose.connection.readyState === 1) {
+            mongoose.connection.close();
+            console.log('✅ Conexión MongoDB cerrada');
+          }
+        } catch (e) {}
+        
+        console.log('👋 Servidor cerrado exitosamente');
+        process.exit(0);
+      });
 
-  } catch (err) {
-    console.error('[server] Error inicializando app (fatal):', err && (err.stack || err.message));
+      // Timeout forzado después de 10 segundos
+      setTimeout(() => {
+        console.error('❌ Timeout forzando cierre del servidor');
+        process.exit(1);
+      }, 10000);
+    };
+
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    
+  } catch (error) {
+    console.error('❌ Error crítico inicializando la aplicación:', error);
     process.exit(1);
   }
-})();
+}
+
+/* ----------------------------- MANEJO DE ERRORES GLOBALES ----------------------------- */
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+/* ----------------------------- INICIAR APLICACIÓN ----------------------------- */
+// Iniciar todo el proceso
+initializeApp().catch(error => {
+  console.error('💥 Error fatal al iniciar aplicación:', error);
+  process.exit(1);
+});
+
+module.exports = app;

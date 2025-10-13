@@ -26,4 +26,5 @@ router.delete('/:id/sales', authMiddleware, async (req, res) => {
   }
 });
 
+// Asegúrate de que el router se exporte correctamente
 module.exports = router;
