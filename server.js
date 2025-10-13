@@ -1,28 +1,24 @@
-// server.js - VERSIÓN CORREGIDA CON CORS (acepta subdominios de netlify.app)
+// server.js - versión reforzada con logging y validación de mounts
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 
-// ==========================================================
-// 🚨 CONFIGURACIÓN DE CORS (SOLUCIÓN AL PROBLEMA)
-// ==========================================================
+const app = express();
+const PORT = process.env.PORT || 4000;
 
-// Lista base de orígenes permitidos (puedes ajustar)
+// --------------------------------------------------------
+// CORS: permitir subdominios netlify.app y localhost
+// --------------------------------------------------------
 const allowedOrigins = [
-  // Si tenés un dominio fijo de producción, añadilo aquí (opcional)
-  // 'https://mi-front-produccion.netlify.app',
-
-  // Dominios locales para desarrollo
   'http://localhost:4000',
   'http://localhost:3000',
 ];
 
-// Permite cualquier subdominio de netlify.app (previews + deploys)
 const isNetlifyOrigin = (origin) => {
   if (!origin) return false;
   try {
     const hostname = new URL(origin).hostname;
-    // Acepta *.netlify.app (ej: something--sitename.netlify.app)
     return /\.netlify\.app$/.test(hostname);
   } catch (e) {
     return false;
@@ -31,13 +27,10 @@ const isNetlifyOrigin = (origin) => {
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Permitir requests sin origin (ej: curl, Postman, servidores)
     if (!origin) return callback(null, true);
-
     if (allowedOrigins.includes(origin) || isNetlifyOrigin(origin)) {
       return callback(null, true);
     }
-
     console.warn('[CORS] Origen bloqueado:', origin);
     return callback(new Error('Acceso no permitido por CORS'));
   },
@@ -47,138 +40,151 @@ const corsOptions = {
   preflightContinue: false,
 };
 
-// ==========================================================
-// Rutas (EN RAÍZ - sin src/)
-const authRoutes = require('./routes/auth');
-const productosRoutes = require('./routes/productos');
-const salesRoutes = require('./routes/sales');
-const servicesRoutes = require('./routes/services');
-const alertsRoutes = require('./routes/alerts');
-const reportsRoutes = require('./routes/reports');
-const customersRoutes = require('./routes/customers');
-const paymentsRoutes = require('./routes/payments');
-const customerSalesRoutes = require('./routes/customerSales');
-
-const app = express();
-const PORT = process.env.PORT || 4000;
-
-// Middlewares
-app.use(cors(corsOptions));           // aplica CORS a todas las rutas
-app.options('*', cors(corsOptions));  // responde a preflight OPTIONS
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 
-// Healthcheck
+// healthcheck
 app.get('/', (req, res) => res.send('API backend funcionando'));
 
-// Async init
+// --------------------------------------------------------
+// Funciones auxiliares para require y montaje seguro
+// --------------------------------------------------------
+function safeRequire(modulePath) {
+  try {
+    const resolved = require.resolve(modulePath);
+    const mod = require(modulePath);
+    console.log(`[SAFE_REQUIRE] OK -> ${modulePath} (resolved: ${resolved})`);
+    return mod;
+  } catch (err) {
+    console.error(`[SAFE_REQUIRE] ERROR al require '${modulePath}':`, err && (err.stack || err.message));
+    return null;
+  }
+}
+
+function isLikelyExpressRouter(obj) {
+  // Un Router en Express tiene .stack (array) y .use / .handle funcs en general
+  return obj && (typeof obj === 'function' || (Array.isArray(obj.stack) && obj.handle));
+}
+
+/**
+ * Monta una ruta de forma segura y loggea información útil.
+ * Si el "routerModule" no es un router válido, no lo monta.
+ */
+function safeMount(mountPath, modulePath) {
+  try {
+    const mod = safeRequire(modulePath);
+    if (!mod) {
+      console.warn(`[SAFE_MOUNT] Módulo no cargado: ${modulePath}, saltando mount ${mountPath}`);
+      return;
+    }
+
+    // Si el módulo exporta un objeto con .default (es build ESM transpilado)
+    const candidate = mod.default || mod;
+
+    if (!isLikelyExpressRouter(candidate)) {
+      console.warn(`[SAFE_MOUNT] El módulo '${modulePath}' no parece un Router/middleware de Express. Tipo: ${typeof candidate}`);
+      // mostrar keys para depuración
+      if (candidate && typeof candidate === 'object') {
+        console.warn('[SAFE_MOUNT] keys del export:', Object.keys(candidate));
+      }
+      // No montamos para evitar que app.use intente parsear algo inválido.
+      return;
+    }
+
+    // Finalmente montar con try/catch
+    try {
+      app.use(mountPath, candidate);
+      console.log(`[SAFE_MOUNT] Montado: '${mountPath}' -> ${modulePath}`);
+    } catch (err) {
+      console.error(`[SAFE_MOUNT] ERROR montando '${mountPath}' con '${modulePath}':`, err && (err.stack || err.message));
+    }
+  } catch (err) {
+    console.error(`[SAFE_MOUNT] ERROR inesperado para '${modulePath}':`, err && (err.stack || err.message));
+  }
+}
+
+// --------------------------------------------------------
+// Montar rutas de forma segura
+// --------------------------------------------------------
+// Lista de mounts (path -> module)
+const mounts = [
+  { path: '/api', module: './routes/auth' },
+  { path: '/api/products', module: './routes/productos' },
+  { path: '/api/sales', module: './routes/sales' },
+  { path: '/api/services', module: './routes/services' },
+  { path: '/api/alerts', module: './routes/alerts' },
+  { path: '/api/reports', module: './routes/reports' },
+  { path: '/api/customers', module: './routes/customers' },
+  { path: '/api/payments', module: './routes/payments' },
+  // si tenés otro router para customer sales con distinto path, listalo separado; 
+  // NO repitas exactamente el mismo path con otro require sin asegurarte del router
+  { path: '/api/customers/sales', module: './routes/customerSales' }
+];
+
+mounts.forEach(m => safeMount(m.path, m.module));
+
+// --------------------------------------------------------
+// Inicializaciones (servicios) en bloques try/catch
+// --------------------------------------------------------
 (async function initApp() {
   try {
-    // 1) Conectar a Mongo (EN RAÍZ)
+    // Conexión a Mongo y otros inits: cada uno en su try/catch para no romper todo
     try {
-      const { connectMongo } = require('./config/mongo'); // ← SIN src/
-      await connectMongo();
-      console.log('[server] Conexión a Mongo OK');
-    } catch (err) {
-      console.warn('[server] No se pudo conectar a Mongo:', err.message);
-    }
-
-    // 2) Inicializar servicios (EN RAÍZ)
-    try {
-      const salesService = require('./services/salesService');
-      if (salesService && typeof salesService.init === 'function') {
-        await salesService.init();
-        console.log('[server] salesService inicializado');
+      const { connectMongo } = safeRequire('./config/mongo') || {};
+      if (connectMongo) {
+        await connectMongo();
+        console.log('[INIT] connectMongo OK');
+      } else {
+        console.warn('[INIT] connectMongo no encontrado o failed require');
       }
     } catch (err) {
-      console.warn('[server] No se pudo inicializar salesService:', err.message);
+      console.warn('[INIT] Error conectando a Mongo:', err && err.message);
     }
 
-    try {
-      const alertsService = require('./services/alertsService'); // ← SIN src/
-      if (alertsService && typeof alertsService.init === 'function') {
-        await alertsService.init();
-        console.log('[server] alertsService inicializado');
+    // Inicializar servicios de forma segura (ejemplo salesService, alertsService, etc)
+    const servicesToInit = [
+      './services/salesService',
+      './services/alertsService',
+      './services/productosService',
+      './services/customersService',
+      './services/servicesService',
+      './services/reportsService' // incluyo reportsService también
+    ];
+
+    for (const sPath of servicesToInit) {
+      try {
+        const svc = safeRequire(sPath);
+        if (svc && typeof svc.init === 'function') {
+          await svc.init();
+          console.log(`[INIT] Servicio inicializado: ${sPath}`);
+        } else {
+          console.log(`[INIT] Servicio sin init (skip): ${sPath}`);
+        }
+      } catch (err) {
+        console.warn(`[INIT] Error inicializando servicio ${sPath}:`, err && err.message);
       }
-    } catch (err) {
-      console.warn('[server] No se pudo inicializar alertsService:', err.message);
     }
 
-    try {
-      const productosService = require('./services/productosService'); // ← SIN src/
-      if (productosService && typeof productosService.init === 'function') {
-        await productosService.init();
-        console.log('[server] productosService inicializado');
-      }
-    } catch (err) {
-      console.warn('[server] No se pudo inicializar productosService:', err.message);
-    }
-
-    try {
-      const customersService = require('./services/customersService'); // ← SIN src/
-      if (customersService && typeof customersService.init === 'function') {
-        await customersService.init();
-        console.log('[server] customersService inicializado');
-      }
-    } catch (err) {
-      console.warn('[server] No se pudo inicializar customersService:', err.message);
-    }
-
-    try {
-      const servicesService = require('./services/servicesService'); // ← SIN src/
-      if (servicesService && typeof servicesService.init === 'function') {
-        await servicesService.init();
-        console.log('[server] servicesService inicializado');
-      }
-    } catch (err) {
-      console.warn('[server] No se pudo inicializar servicesService:', err.message);
-    }
-
-    // Ruta manual para generar alertas (TEMPORAL)
+    // Route temporal para debug
     app.get('/api/alerts/generate', async (req, res) => {
       try {
-        const alertsService = require('./services/alertsService'); // ← SIN src/
-        console.log('[DEBUG] Generando alertas manualmente...');
+        const alertsService = safeRequire('./services/alertsService');
+        if (!alertsService || typeof alertsService.checkAndCreateAlerts !== 'function') {
+          return res.status(500).json({ success: false, message: 'alertsService no disponible' });
+        }
         const created = await alertsService.checkAndCreateAlerts();
-        res.json({ 
-          success: true, 
-          message: `Generadas ${created.length} alertas`,
-          alerts: created 
-        });
+        return res.json({ success: true, message: `Generadas ${created.length} alertas`, alerts: created });
       } catch (err) {
-        console.error('[DEBUG] Error generando alertas:', err);
-        res.status(500).json({ 
-          success: false, 
-          error: err.message 
-        });
+        console.error('DEBUG generate alerts error:', err);
+        return res.status(500).json({ success: false, error: err.message });
       }
     });
 
-    // 3) Montar rutas
-    app.use('/api', authRoutes);
-    app.use('/api/products', productosRoutes);
-    app.use('/api/sales', salesRoutes);
-    app.use('/api/services', servicesRoutes);
-    app.use('/api/alerts', alertsRoutes);
-    app.use('/api/reports', reportsRoutes);
-    app.use('/api/customers', customersRoutes);
-    app.use('/api/payments', paymentsRoutes);
-    app.use('/api/customers', customerSalesRoutes);
-
-    // 4) Levantar server
+    // Levantar servidor
     const server = app.listen(PORT, () => {
-      console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
+      console.log(`🚀 Servidor corriendo en http://localhost:${PORT} (PORT env: ${process.env.PORT})`);
     });
-
-    // 5) Arrancar job de alertas (EN RAÍZ)
-    try {
-      const { start: startAlertsJob } = require('./jobs/alertsJob'); // ← SIN src/
-      if (typeof startAlertsJob === 'function') {
-        startAlertsJob();
-        console.log('[server] alertsJob arrancado');
-      }
-    } catch (err) {
-      console.error('[server] No se pudo arrancar alertsJob:', err.message);
-    }
 
     // Graceful shutdown
     const shutdown = async () => {
@@ -197,7 +203,7 @@ app.get('/', (req, res) => res.send('API backend funcionando'));
     process.on('SIGTERM', shutdown);
 
   } catch (err) {
-    console.error('[server] Error inicializando app:', err);
+    console.error('[server] Error inicializando app (fatal):', err && (err.stack || err.message));
     process.exit(1);
   }
 })();
