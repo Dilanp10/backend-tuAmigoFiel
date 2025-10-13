@@ -7,6 +7,48 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+/**
+ * --------------------------------------------------------
+ * Debug env (temporal): listar variables de entorno que parecen URLs
+ * --------------------------------------------------------
+ */
+console.log('--- DEBUG ENV CHECK (start) ---');
+Object.keys(process.env).forEach((k) => {
+  const v = process.env[k];
+  if (!v) return;
+  if (/(https?:\/\/)|git\.new/i.test(String(v))) {
+    console.log(`[ENV] ${k} = ${v}`);
+  }
+});
+console.log('--- DEBUG ENV CHECK (end) ---');
+
+/**
+ * --------------------------------------------------------
+ * Helper: extraer sólo path de una posible URL completa.
+ * Si recibimos una URL completa por error (p. ej. en una env var),
+ * sóloPath() devuelve la parte pathname para evitar que Express
+ * reciba una URL completa como ruta y rompa path-to-regexp.
+ * --------------------------------------------------------
+ */
+function onlyPath(maybeUrlOrPath) {
+  if (!maybeUrlOrPath) return '/';
+  try {
+    const s = String(maybeUrlOrPath).trim();
+    if (s.startsWith('/')) return s;
+    if (/^https?:\/\//i.test(s)) {
+      try {
+        const u = new URL(s);
+        return u.pathname || '/';
+      } catch (e) {
+        return s;
+      }
+    }
+    return s;
+  } catch (e) {
+    return '/';
+  }
+}
+
 // --------------------------------------------------------
 // CORS: permitir subdominios netlify.app y localhost
 // --------------------------------------------------------
@@ -27,7 +69,7 @@ const isNetlifyOrigin = (origin) => {
 
 const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
+    if (!origin) return callback(null, true); // Postman / server-side requests
     if (allowedOrigins.includes(origin) || isNetlifyOrigin(origin)) {
       return callback(null, true);
     }
@@ -63,8 +105,15 @@ function safeRequire(modulePath) {
 }
 
 function isLikelyExpressRouter(obj) {
-  // Un Router en Express tiene .stack (array) y .use / .handle funcs en general
-  return obj && (typeof obj === 'function' || (Array.isArray(obj.stack) && obj.handle));
+  // Un Router en Express puede ser una función (middleware) o un objeto con .stack / .handle
+  if (!obj) return false;
+  if (typeof obj === 'function') return true;
+  if (typeof obj === 'object') {
+    if (Array.isArray(obj.stack) && typeof obj.handle === 'function') return true;
+    // Express Router transpiled puede exponer "router" o "default"
+    if (obj.router && Array.isArray(obj.router.stack)) return true;
+  }
+  return false;
 }
 
 /**
@@ -73,9 +122,12 @@ function isLikelyExpressRouter(obj) {
  */
 function safeMount(mountPath, modulePath) {
   try {
+    // por seguridad, convertir mountPath si viniera como URL completa en una env
+    const safeMountPath = onlyPath(mountPath);
+
     const mod = safeRequire(modulePath);
     if (!mod) {
-      console.warn(`[SAFE_MOUNT] Módulo no cargado: ${modulePath}, saltando mount ${mountPath}`);
+      console.warn(`[SAFE_MOUNT] Módulo no cargado: ${modulePath}, saltando mount ${safeMountPath}`);
       return;
     }
 
@@ -84,20 +136,18 @@ function safeMount(mountPath, modulePath) {
 
     if (!isLikelyExpressRouter(candidate)) {
       console.warn(`[SAFE_MOUNT] El módulo '${modulePath}' no parece un Router/middleware de Express. Tipo: ${typeof candidate}`);
-      // mostrar keys para depuración
       if (candidate && typeof candidate === 'object') {
         console.warn('[SAFE_MOUNT] keys del export:', Object.keys(candidate));
       }
-      // No montamos para evitar que app.use intente parsear algo inválido.
       return;
     }
 
     // Finalmente montar con try/catch
     try {
-      app.use(mountPath, candidate);
-      console.log(`[SAFE_MOUNT] Montado: '${mountPath}' -> ${modulePath}`);
+      app.use(safeMountPath, candidate);
+      console.log(`[SAFE_MOUNT] Montado: '${safeMountPath}' -> ${modulePath}`);
     } catch (err) {
-      console.error(`[SAFE_MOUNT] ERROR montando '${mountPath}' con '${modulePath}':`, err && (err.stack || err.message));
+      console.error(`[SAFE_MOUNT] ERROR montando '${safeMountPath}' con '${modulePath}':`, err && (err.stack || err.message));
     }
   } catch (err) {
     console.error(`[SAFE_MOUNT] ERROR inesperado para '${modulePath}':`, err && (err.stack || err.message));
@@ -107,7 +157,9 @@ function safeMount(mountPath, modulePath) {
 // --------------------------------------------------------
 // Montar rutas de forma segura
 // --------------------------------------------------------
-// Lista de mounts (path -> module)
+// Nota: si tenías dos mounts con el mismo path ('/api/customers' dos veces),
+// eso puede causar confusión. Aquí los listamos de forma explícita y
+// usamos onlyPath para evitar errores si alguna env trae una URL completa.
 const mounts = [
   { path: '/api', module: './routes/auth' },
   { path: '/api/products', module: './routes/productos' },
@@ -117,8 +169,7 @@ const mounts = [
   { path: '/api/reports', module: './routes/reports' },
   { path: '/api/customers', module: './routes/customers' },
   { path: '/api/payments', module: './routes/payments' },
-  // si tenés otro router para customer sales con distinto path, listalo separado; 
-  // NO repitas exactamente el mismo path con otro require sin asegurarte del router
+  // Si precisás una ruta específica para ventas de clientes, montarla con path distinto:
   { path: '/api/customers/sales', module: './routes/customerSales' }
 ];
 
@@ -131,8 +182,9 @@ mounts.forEach(m => safeMount(m.path, m.module));
   try {
     // Conexión a Mongo y otros inits: cada uno en su try/catch para no romper todo
     try {
-      const { connectMongo } = safeRequire('./config/mongo') || {};
-      if (connectMongo) {
+      const mongoModule = safeRequire('./config/mongo') || {};
+      const connectMongo = mongoModule.connectMongo || (mongoModule.default && mongoModule.default.connectMongo);
+      if (typeof connectMongo === 'function') {
         await connectMongo();
         console.log('[INIT] connectMongo OK');
       } else {
@@ -166,7 +218,7 @@ mounts.forEach(m => safeMount(m.path, m.module));
       }
     }
 
-    // Route temporal para debug
+    // Route temporal para debug (si necesitás probar job de alertas manualmente)
     app.get('/api/alerts/generate', async (req, res) => {
       try {
         const alertsService = safeRequire('./services/alertsService');
@@ -176,14 +228,14 @@ mounts.forEach(m => safeMount(m.path, m.module));
         const created = await alertsService.checkAndCreateAlerts();
         return res.json({ success: true, message: `Generadas ${created.length} alertas`, alerts: created });
       } catch (err) {
-        console.error('DEBUG generate alerts error:', err);
+        console.error('DEBUG generate alerts error:', err && (err.stack || err.message));
         return res.status(500).json({ success: false, error: err.message });
       }
     });
 
     // Levantar servidor
     const server = app.listen(PORT, () => {
-      console.log(`🚀 Servidor corriendo en http://localhost:${PORT} (PORT env: ${process.env.PORT})`);
+      console.log(`🚀 Servidor corriendo en http://localhost:${PORT} (PORT env: ${process.env.PORT || '(none)'})`);
     });
 
     // Graceful shutdown
@@ -196,7 +248,9 @@ mounts.forEach(m => safeMount(m.path, m.module));
           await mongoose.disconnect();
           console.log('Mongo desconectado');
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn('Error durante shutdown:', e && e.message);
+      }
       process.exit(0);
     };
     process.on('SIGINT', shutdown);
