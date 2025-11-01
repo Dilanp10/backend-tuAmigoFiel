@@ -11,10 +11,12 @@ console.log('🚀 Iniciando servidor TuAmigoFielLocal...');
 // CORS configurado para producción
 app.use(cors({
   origin: [
+    'http://localhost:5173',
     'http://localhost:3000',
     'http://localhost:4000', 
     'https://remarkable-cajeta-23ef55.netlify.app',
-    'https://backend-tuamigofiel.onrender.com'
+    'https://backend-tuamigofiel.onrender.com',
+    'https://timely-churros-9d5736.netlify.app'
   ],
   credentials: true
 }));
