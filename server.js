@@ -1,4 +1,5 @@
 // server.js - VERSIÓN FINAL BASADA EN EL DIAGNÓSTICO
+//sera esto
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
